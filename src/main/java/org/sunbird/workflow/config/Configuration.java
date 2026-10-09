@@ -221,6 +221,9 @@ public class Configuration {
     @Value("${user.bulk.upload.category.value}")
     private String bulkUploadCategoryValue;
 
+    @Value("${user.bulk.upload.csv.designation.regex}")
+    private String csvDesignationRegex;
+
     @Value("${user.default.group.values}")
     private String groupValues;
 
@@ -928,6 +931,14 @@ public class Configuration {
 
     public void setBulkUploadCategoryValue(String bulkUploadCategoryValue) {
         this.bulkUploadCategoryValue = bulkUploadCategoryValue;
+    }
+
+    public String getCsvDesignationRegex() {
+        return csvDesignationRegex;
+    }
+
+    public void setCsvDesignationRegex(String csvDesignationRegex) {
+        this.csvDesignationRegex = csvDesignationRegex;
     }
 
     public List<String> getGroupValues() {

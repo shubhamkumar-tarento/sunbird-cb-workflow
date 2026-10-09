@@ -1,8 +1,5 @@
 package org.sunbird.workflow.controller;
 
-import java.io.IOException;
-import java.util.Map;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -12,10 +9,12 @@ import org.springframework.web.multipart.MultipartFile;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.service.BPWorkFlowService;
+import org.sunbird.workflow.service.QrCodeSelfEnrolmentService;
 
-import org.sunbird.workflow.service.DomainWhiteListWorkFlowService;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/blendedprogram/workflow")
@@ -23,6 +22,10 @@ public class BPWorkFlowController {
 
     @Autowired
     private BPWorkFlowService bPWorkFlowService;
+
+    @Autowired
+    private QrCodeSelfEnrolmentService qrCodeSelfEnrolmentService;
+
 
     @PostMapping("/enrol")
     public ResponseEntity<Response> blendedProgramEnrolWf(@RequestHeader String rootOrg, @RequestHeader String org,
@@ -175,6 +178,17 @@ public class BPWorkFlowController {
 
         Response response = bPWorkFlowService.nominateUsers(rootOrg, org, actorUserId, requestBody);
         return new ResponseEntity<>(response, (HttpStatus) response.get(Constants.STATUS));
+    }
+
+    @PostMapping("/qr/enrolments")
+    public ResponseEntity<Response> blendedProgramQrEnrol(@RequestHeader String rootOrg,
+                                                          @RequestHeader String org,
+                                                          @RequestHeader(Constants.X_AUTH_TOKEN) String userAuthToken,
+                                                          @RequestBody QrSelfEnrolRequest qrRequest) {
+
+        Response response = qrCodeSelfEnrolmentService.enrolQrCodeBPWorkFlow(rootOrg, org, userAuthToken, qrRequest);
+        HttpStatus statusCode = (HttpStatus) response.get(Constants.STATUS);
+        return new ResponseEntity<>(response, statusCode);
     }
 
 }

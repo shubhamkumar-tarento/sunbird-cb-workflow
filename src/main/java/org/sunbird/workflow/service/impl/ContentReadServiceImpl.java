@@ -47,6 +47,7 @@ public class ContentReadServiceImpl implements ContentReadService {
                     Map<String, Object> result = new HashMap<>();
                     result.put("wfApprovalType", responseObj.get("wfApprovalType"));
                     result.put("primaryCategory", responseObj.get("primaryCategory"));
+                    result.put(Constants.SELF_ENROLLMENT, responseObj.get(Constants.SELF_ENROLLMENT));
                     return result;
                 }
             }

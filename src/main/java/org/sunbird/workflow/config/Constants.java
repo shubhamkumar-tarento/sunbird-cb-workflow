@@ -220,7 +220,7 @@ public class Constants {
 	public static final String INVITE_ONLY="invite-only";
 	public static final String REMOVED = "REMOVED";
 
-	public static final String MULTILEVEL_BP_ENROLL_FIELDS="primaryCategory,wfApprovalType";
+	public static final String MULTILEVEL_BP_ENROLL_FIELDS="primaryCategory,wfApprovalType,selfEnrollment";
 	public static final String CREATED_FOR= "createdFor";
 	public static final String BATCH_IS_FULL="BATCH_IS_FULL";
 	public static final String ENROLL_IS_IN_PROGRESS="ENROLL_IS_IN_PROGRESS";
@@ -494,4 +494,26 @@ public class Constants {
 	public static final String TABLE_USER_ROLES = "user_roles";
 	public static final String ROLE = "role";
 	public static final String VOLUNTEER_NOT_ELIGIBLE_TO_ENROLL = "User is not eligible to enrol into this course.";
+	public static final String SELF_ENROLLMENT = "selfEnrollment";
+	public static final String SELF_ENROLL_BY_QR = "selfEnrollByQRCode";
+
+	// QR Code Self-Enrolment Error Messages
+	public static final String QR_REQUEST_NULL_ERROR = "QR enrolment request cannot be null";
+	public static final String COURSE_ID_REQUIRED_ERROR = "Course ID is required for QR enrolment";
+	public static final String BATCH_ID_REQUIRED_ERROR = "Batch ID is required for QR enrolment";
+	public static final String ROOT_ORG_REQUIRED_ERROR = "Root Organization is required";
+	public static final String ORG_REQUIRED_ERROR = "Organization is required";
+	public static final String COURSE_NOT_FOUND_ERROR = "Course not found. CourseId: %s";
+	public static final String BATCH_NOT_FOUND_ERROR = "Batch not found. CourseId: %s, BatchId: %s";
+	public static final String BATCH_ENROLLMENT_PERIOD_ENDED_ERROR = "Batch enrolment has not started yet, or the enrolment period has ended. QR enrolment is not allowed.";
+	public static final String QR_ENROLLMENT_DATE_ERROR = "QR Self-Enrolment is allowed only on the batch start date. Batch starts on %s. Today is %s";
+	public static final String BATCH_START_DATE_UNAVAILABLE_ERROR = "Batch start date is not available";
+	public static final String COURSE_DETAILS_UNAVAILABLE_ERROR = "Course details are not available.";
+	public static final String SELF_ENROLLMENT_NOT_ENABLED_ERROR = "Self-enrolment is not enabled for this course.";
+	public static final String USER_ALREADY_ENROLLED_SAME_BATCH_ERROR = "User is already enrolled in this batch.";
+	public static final String USER_ALREADY_ENROLLED_DIFFERENT_BATCH_ERROR = "User is already enrolled in another active batch (%s) for this course. A learner can be enrolled in only one batch of a course at a time.";
+	public static final String ACTIVE_WORKFLOW_EXISTS_ERROR = "Active workflow already exists for this user and batch. Current status: %s";
+	public static final String INVALID_ACCESS_TOKEN_ERROR = "Invalid access token.";
+	public static final String YES ="Yes";
+	public static final String QR_ENROLLMENT_SUCCESS_MESSAGE = "You are successfully enrolled into the program";
 }
