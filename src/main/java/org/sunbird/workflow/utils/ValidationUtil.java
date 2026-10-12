@@ -1,5 +1,8 @@
 package org.sunbird.workflow.utils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -7,6 +10,8 @@ import java.util.regex.Pattern;
 
 
 public class ValidationUtil {
+
+	private static final Logger logger = LoggerFactory.getLogger(ValidationUtil.class);
 
 	private ValidationUtil() {
 	}
@@ -47,7 +52,7 @@ public class ValidationUtil {
 			Date date = dateFormat.parse(dateString);
 			return date.after(pastDate) && (date.before(todaysDate) || date.equals(todaysDate));
 		} catch (ParseException e) {
-			e.printStackTrace();
+			logger.warn("Failed to parse date: {}", dateString, e);
 		}
 		return false;
 	}

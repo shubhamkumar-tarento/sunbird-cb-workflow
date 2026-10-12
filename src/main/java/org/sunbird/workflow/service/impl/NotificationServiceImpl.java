@@ -122,7 +122,7 @@ public class NotificationServiceImpl {
 			logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
 			logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
 		} catch (JsonProcessingException e) {
-			e.printStackTrace();
+			logger.error("Failed to serialize workflow status for logging", e);
 		}
 		if (Constants.PROFILE_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName()) && Constants.WITHDRAWN.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
 			return;
@@ -208,7 +208,7 @@ public class NotificationServiceImpl {
 			logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
 			logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
 		} catch (JsonProcessingException e) {
-			e.printStackTrace();
+			logger.error("Failed to serialize workflow status for logging", e);
 		}
 		if (Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
 			logger.info("Enters in the email notification block");

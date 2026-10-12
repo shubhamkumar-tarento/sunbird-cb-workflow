@@ -1,5 +1,8 @@
 package org.sunbird.workflow.utils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
@@ -11,6 +14,8 @@ import java.util.Properties;
  */
 
 public class CassandraPropertyReader {
+
+	private static final Logger logger = LoggerFactory.getLogger(CassandraPropertyReader.class);
 
 	private final Properties properties = new Properties();
 	  private static final String PROPERTIES_FILE_NAME = "cassandratablecolumn.properties";
@@ -32,8 +37,7 @@ public class CassandraPropertyReader {
 	      try {
 	    	  cassandraPropertyReader = new CassandraPropertyReader();
 	      } catch (IOException e) {
-	    	  // TODO Auto-generated catch block
-	    	  e.printStackTrace();
+	    	  logger.error("Failed to initialize CassandraPropertyReader", e);
 	      }
 	    }
 	    return cassandraPropertyReader;
