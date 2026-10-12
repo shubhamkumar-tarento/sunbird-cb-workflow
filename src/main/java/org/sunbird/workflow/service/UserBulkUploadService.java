@@ -775,7 +775,7 @@ public class UserBulkUploadService {
                 List<CSVRecord> csvRecords = csvParser.getRecords();
                 List<Map<String, Object>> updatedRecords = new ArrayList<>();
                 List<String> headers = new ArrayList<>(csvParser.getHeaderNames());
-                headers.replaceAll(header -> header.replaceAll("(?:^\"|\"$)", ""));
+                headers.replaceAll(header -> header.replaceAll("(?:^\")|(?:\"$)", ""));
 
                 if (!headers.contains(Constants.STATUS_BULK_UPLOAD)) {
                     headers.add(Constants.STATUS_BULK_UPLOAD);

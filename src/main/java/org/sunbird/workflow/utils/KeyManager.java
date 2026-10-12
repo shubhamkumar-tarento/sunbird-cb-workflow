@@ -61,13 +61,44 @@ public class KeyManager {
 
   public static PublicKey loadPublicKey(String key) throws GeneralSecurityException {
     String publicKey = new String(key.getBytes(), StandardCharsets.UTF_8);
-    publicKey = publicKey.replaceAll("(-++BEGIN PUBLIC KEY-++)", "");
-    publicKey = publicKey.replaceAll("(-++END PUBLIC KEY-++)", "");
-    publicKey = publicKey.replaceAll("[\\r\\n]+", "");
+    publicKey = removePemArmor(publicKey, "BEGIN PUBLIC KEY");
+    publicKey = removePemArmor(publicKey, "END PUBLIC KEY");
+    publicKey = stripLineBreaks(publicKey);
     byte[] keyBytes = Base64Util.decode(publicKey.getBytes(StandardCharsets.UTF_8), Base64Util.DEFAULT);
 
     X509EncodedKeySpec X509publicKey = new X509EncodedKeySpec(keyBytes);
     KeyFactory kf = KeyFactory.getInstance("RSA");
     return kf.generatePublic(X509publicKey);
+  }
+
+  /**
+   * Removes a PEM armor marker (e.g. "BEGIN PUBLIC KEY") along with any dashes
+   * immediately surrounding it, without using a regular expression.
+   */
+  private static String removePemArmor(String input, String marker) {
+    int markerStart = input.indexOf(marker);
+    if (markerStart < 0) {
+      return input;
+    }
+    int start = markerStart;
+    while (start > 0 && input.charAt(start - 1) == '-') {
+      start--;
+    }
+    int end = markerStart + marker.length();
+    while (end < input.length() && input.charAt(end) == '-') {
+      end++;
+    }
+    return input.substring(0, start) + input.substring(end);
+  }
+
+  private static String stripLineBreaks(String input) {
+    StringBuilder result = new StringBuilder(input.length());
+    for (int i = 0; i < input.length(); i++) {
+      char c = input.charAt(i);
+      if (c != '\r' && c != '\n') {
+        result.append(c);
+      }
+    }
+    return result.toString();
   }
 }

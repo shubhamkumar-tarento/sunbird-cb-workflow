@@ -395,7 +395,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		builder.append(configuration.getLmsAssignRoleEndPoint());
 		Map<String, Object> readData = (Map<String, Object>) requestServiceImpl
 				.fetchResultUsingPost(builder, request, Map.class, getHeadersWithXAuth(userToken));
-		if (Constants.OK.equalsIgnoreCase((String) readData.get(Constants.RESPONSE_CODE))) {
+		if (readData != null && Constants.OK.equalsIgnoreCase((String) readData.get(Constants.RESPONSE_CODE))) {
 			retValue = true;
 		}
 		return retValue;
@@ -565,8 +565,9 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	public void updateUserProfileV2(List<WfRequest> wfRequests, String userId, String userToken) {
 		try {
 			Map<String, Object> readData = (Map<String, Object>) userProfileRead(userId);
-			if (readData != null && !Constants.OK.equals(readData.get(Constants.RESPONSE_CODE))) {
-				Map<String, Object> params = (Map<String, Object>) readData.getOrDefault(Constants.PARAMS, Collections.emptyMap());
+			if (readData == null || !Constants.OK.equals(readData.get(Constants.RESPONSE_CODE))) {
+				Map<String, Object> params = readData == null ? Collections.emptyMap()
+						: (Map<String, Object>) readData.getOrDefault(Constants.PARAMS, Collections.emptyMap());
 				String detailedError = (String) params.getOrDefault(Constants.ERROR_MESSAGE, "No additional details provided.");
 				String errorMessage = "User not found: " + detailedError;
 				logger.error(errorMessage);
