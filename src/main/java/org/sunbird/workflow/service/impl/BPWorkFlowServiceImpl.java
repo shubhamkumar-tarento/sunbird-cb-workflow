@@ -13,7 +13,6 @@ import org.apache.commons.csv.CSVRecord;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -37,7 +36,6 @@ import org.sunbird.workflow.producer.Producer;
 import org.sunbird.workflow.service.BPWorkFlowService;
 import org.sunbird.workflow.service.ContentReadService;
 import org.sunbird.workflow.service.Workflowservice;
-import org.sunbird.workflow.utils.AccessTokenValidator;
 import org.sunbird.workflow.utils.CassandraOperation;
 import org.sunbird.workflow.utils.ElasticsearchServiceManager;
 import org.sunbird.workflow.utils.UserUtil;
@@ -54,36 +52,32 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
     private Logger logger = LoggerFactory.getLogger(BPWorkFlowServiceImpl.class);
 
-    @Autowired
-    @Qualifier("workflowServiceImpl")
-    private Workflowservice workflowService;
+    private final Workflowservice workflowService;
+    private final CassandraOperation cassandraOperation;
+    private final RequestServiceImpl requestServiceImpl;
+    private final Configuration configuration;
+    private final WfStatusRepo wfStatusRepo;
+    private final ObjectMapper mapper;
+    private final Producer producer;
+    private final ContentReadService contentReadService;
+    private final UserUtil userUtils;
+    private final ElasticsearchServiceManager elasticsearchServiceManager;
 
-    @Autowired
-    private CassandraOperation cassandraOperation;
-
-    @Autowired
-    private RequestServiceImpl requestServiceImpl;
-
-    @Autowired
-    private Configuration configuration;
-
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    private Producer producer;
-
-    @Autowired
-    private ContentReadService contentReadService;
-
-    @Autowired
-    private UserUtil userUtils;
-
-    @Autowired
-    ElasticsearchServiceManager elasticsearchServiceManager;
+    public BPWorkFlowServiceImpl(@Qualifier("workflowServiceImpl") Workflowservice workflowService,
+            CassandraOperation cassandraOperation, RequestServiceImpl requestServiceImpl, Configuration configuration,
+            WfStatusRepo wfStatusRepo, ObjectMapper mapper, Producer producer, ContentReadService contentReadService,
+            UserUtil userUtils, ElasticsearchServiceManager elasticsearchServiceManager) {
+        this.workflowService = workflowService;
+        this.cassandraOperation = cassandraOperation;
+        this.requestServiceImpl = requestServiceImpl;
+        this.configuration = configuration;
+        this.wfStatusRepo = wfStatusRepo;
+        this.mapper = mapper;
+        this.producer = producer;
+        this.contentReadService = contentReadService;
+        this.userUtils = userUtils;
+        this.elasticsearchServiceManager = elasticsearchServiceManager;
+    }
 
     @Value("${es.org.eligibility.index}")
     private String orgeligibilityIndex;
@@ -138,7 +132,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
     @Override
     public Response updateBPWorkFlow(String rootOrg, String org, WfRequest wfRequest,String userId,String role) {
-        logger.info("Workflow request Body received: " + wfRequest);
+        logger.info("Workflow request Body received: {}", wfRequest);
         Response response = new Response();
         Map<String, Object> batchDetailsMap = new HashMap<>();
         String validationError = validateBatchUserRequestAccess(wfRequest, batchDetailsMap);
@@ -224,8 +218,12 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                         && "OK".equalsIgnoreCase((String) enrolResp.get(Constants.RESPONSE_CODE))) {
                     logger.info("User enrolment success");
                 } else {
-                    logger.error("user enrolment failed"
-                            + ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+                    if (enrolResp != null) {
+                        logger.error("user enrolment failed"
+                                + ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+                    } else {
+                        logger.error("user enrolment failed: no response from course service");
+                    }
                     if (wfRequest.getState().equalsIgnoreCase(Constants.SEND_FOR_PC_APPROVAL) && wfRequest.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
                         reverseApprovedRequest(wfRequest);
                     }
@@ -280,8 +278,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                     result.put(Constants.BATCH_NAME, batchName);
                     return result;
                 } catch (Exception e) {
-                    logger.error(String.format("Failed to retrieve course batch details. CourseId: %s, BatchId: %s",
-                            courseId, batchId), e);
+                    logger.error("Failed to retrieve course batch details. CourseId: {}, BatchId: {}",
+                            courseId, batchId, e);
                 }
             }
         }
@@ -297,7 +295,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 .filter(item -> {
                     return item != null && item.containsKey("active") && (boolean) item.get("active") == true;
                 })
-                .collect(Collectors.toList()).size();
+                .toList().size();
     }
     public boolean validateBatchEnrolment(Map<String, Object> courseBatchDetails, int totalApprovedUserCount,
             int totalUserEnrolCount, String bpState) {
@@ -433,77 +431,89 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             List<Map<String, Object>> courseBatchDetailsList = cassandraOperation.getRecordsByProperties(
                     Constants.KEYSPACE_SUNBIRD_COURSES, Constants.TABLE_COURSE_BATCH, propertyMap, fileds);
             for (Map<String, Object> courseBatchDetail : courseBatchDetailsList) {
-                // Process batch details
-                Date endDate = courseBatchDetail.containsKey(Constants.END_DATE)
-                        ? Date.from((Instant) courseBatchDetail.get(Constants.END_DATE))
-                        : null;
-                Date todayDate = new Date();
-                if (todayDate.after(endDate)) {
-                    continue;
-                }
-                String courseId = (String) courseBatchDetail.get(Constants.COURSE_ID_KEY);
-                String batchId = (String) courseBatchDetail.get(Constants.BATCH_ID_KEY);
-                Map<String, Object> respCourseBatch = (Map<String, Object>) respCourseDetails.get(courseId);
-                Map<String, Object> respBatchDetailsMap = null;
-                if (ObjectUtils.isEmpty(respCourseBatch)) {
-                    respCourseBatch = new HashMap<String, Object>();
-                    respCourseBatch.put(Constants.COURSE_ID, courseId);
-                    respBatchDetailsMap = new HashMap<String, Object>();
-                } else {
-                    respBatchDetailsMap = (Map<String, Object>) respCourseBatch.get(Constants.BATCH_DETAILS_KEY);
-                }
-
-                Map<String, Object> respBatchDetail = new HashMap<String, Object>();
-                // Batch is active. Get the batch enrolment details.
-                List<WfStatusEntity> wfEntries = wfStatusRepo.findByServiceNameAndApplicationId(
-                        Constants.BLENDED_PROGRAM_SERVICE_NAME, batchId);
-                Map<String, Long> statusCount = wfEntries.stream()
-                        .map(WfStatusEntity::getCurrentStatus)
-                        .collect(Collectors.groupingBy(status -> status, Collectors.counting()));
-
-                long newRequestCount = 0;
-                long learnerCount = 0;
-                long rejectedCount = 0;
-                for (Map.Entry<String, Long> entry : statusCount.entrySet()) {
-                    switch (entry.getKey()) {
-                        case Constants.SEND_FOR_PC_APPROVAL:
-                            newRequestCount = entry.getValue();
-                            break;
-                        case Constants.REJECTED:
-                            rejectedCount = entry.getValue();
-                            break;
-                        case Constants.APPROVED:
-                            learnerCount = entry.getValue();
-                            break;
-                        default:
-                            break;
-                    }
-                }
-                respBatchDetail.put(Constants.NEW_REQUEST_COUNT, newRequestCount);
-                respBatchDetail.put(Constants.LEARNER_COUNT, learnerCount);
-                respBatchDetail.put(Constants.REJECTED_COUNT, rejectedCount);
-
-                respCourseBatch.put(Constants.TOTAL_LEARNER_COUNT,
-                        ((long) respCourseBatch.getOrDefault(Constants.TOTAL_LEARNER_COUNT, 0l)) + learnerCount);
-                respCourseBatch.put(Constants.TOTAL_NEW_REQUEST_COUNT,
-                        ((long) respCourseBatch.getOrDefault(Constants.TOTAL_NEW_REQUEST_COUNT, 0l)) + newRequestCount);
-                respCourseBatch.put(Constants.TOTAL_REJECTED_COUNT,
-                        ((long) respCourseBatch.getOrDefault(Constants.TOTAL_REJECTED_COUNT, 0l)) + rejectedCount);
-                respBatchDetailsMap.put(batchId, respBatchDetail);
-                respCourseBatch.put(Constants.BATCH_DETAILS_KEY, respBatchDetailsMap);
-                respCourseDetails.put(courseId, respCourseBatch);
+                processCourseBatchDetailForStats(courseBatchDetail, respCourseDetails);
             }
             response.setResponseCode(HttpStatus.OK);
             response.getResult().put(Constants.COUNT, respCourseDetails.size());
             response.getResult().put(Constants.CONTENT, respCourseDetails.values());
         } catch (Exception e) {
-            String errMsg = String.format("Failed to get the stats for course. Exception: ", e.getMessage());
+            String errMsg = String.format("Failed to get the stats for course. Exception: %s", e.getMessage());
             response.put(Constants.ERROR_MESSAGE, errMsg);
             response.put(Constants.STATUS, HttpStatus.INTERNAL_SERVER_ERROR);
             response.setResponseCode(HttpStatus.INTERNAL_SERVER_ERROR);
             logger.error(errMsg, e);
         }
         return response;
+    }
+
+    private void processCourseBatchDetailForStats(Map<String, Object> courseBatchDetail, Map<String, Object> respCourseDetails) {
+        Date endDate = courseBatchDetail.containsKey(Constants.END_DATE)
+                ? Date.from((Instant) courseBatchDetail.get(Constants.END_DATE))
+                : null;
+        Date todayDate = new Date();
+        if (todayDate.after(endDate)) {
+            return;
+        }
+        String courseId = (String) courseBatchDetail.get(Constants.COURSE_ID_KEY);
+        String batchId = (String) courseBatchDetail.get(Constants.BATCH_ID_KEY);
+        Map<String, Object> respCourseBatch = (Map<String, Object>) respCourseDetails.get(courseId);
+        Map<String, Object> respBatchDetailsMap;
+        if (ObjectUtils.isEmpty(respCourseBatch)) {
+            respCourseBatch = new HashMap<String, Object>();
+            respCourseBatch.put(Constants.COURSE_ID, courseId);
+            respBatchDetailsMap = new HashMap<String, Object>();
+        } else {
+            respBatchDetailsMap = (Map<String, Object>) respCourseBatch.get(Constants.BATCH_DETAILS_KEY);
+        }
+
+        Map<String, Object> respBatchDetail = new HashMap<String, Object>();
+        // Batch is active. Get the batch enrolment details.
+        List<WfStatusEntity> wfEntries = wfStatusRepo.findByServiceNameAndApplicationId(
+                Constants.BLENDED_PROGRAM_SERVICE_NAME, batchId);
+        Map<String, Long> statusCount = wfEntries.stream()
+                .map(WfStatusEntity::getCurrentStatus)
+                .collect(Collectors.groupingBy(status -> status, Collectors.counting()));
+
+        long[] tally = tallyBlendedProgramStatusCounts(statusCount);
+        long newRequestCount = tally[0];
+        long rejectedCount = tally[1];
+        long learnerCount = tally[2];
+
+        respBatchDetail.put(Constants.NEW_REQUEST_COUNT, newRequestCount);
+        respBatchDetail.put(Constants.LEARNER_COUNT, learnerCount);
+        respBatchDetail.put(Constants.REJECTED_COUNT, rejectedCount);
+
+        respCourseBatch.put(Constants.TOTAL_LEARNER_COUNT,
+                ((long) respCourseBatch.getOrDefault(Constants.TOTAL_LEARNER_COUNT, 0l)) + learnerCount);
+        respCourseBatch.put(Constants.TOTAL_NEW_REQUEST_COUNT,
+                ((long) respCourseBatch.getOrDefault(Constants.TOTAL_NEW_REQUEST_COUNT, 0l)) + newRequestCount);
+        respCourseBatch.put(Constants.TOTAL_REJECTED_COUNT,
+                ((long) respCourseBatch.getOrDefault(Constants.TOTAL_REJECTED_COUNT, 0l)) + rejectedCount);
+        respBatchDetailsMap.put(batchId, respBatchDetail);
+        respCourseBatch.put(Constants.BATCH_DETAILS_KEY, respBatchDetailsMap);
+        respCourseDetails.put(courseId, respCourseBatch);
+    }
+
+    private long[] tallyBlendedProgramStatusCounts(Map<String, Long> statusCount) {
+        long newRequestCount = 0;
+        long learnerCount = 0;
+        long rejectedCount = 0;
+        for (Map.Entry<String, Long> entry : statusCount.entrySet()) {
+            switch (entry.getKey()) {
+                case Constants.SEND_FOR_PC_APPROVAL:
+                    newRequestCount = entry.getValue();
+                    break;
+                case Constants.REJECTED:
+                    rejectedCount = entry.getValue();
+                    break;
+                case Constants.APPROVED:
+                    learnerCount = entry.getValue();
+                    break;
+                default:
+                    break;
+            }
+        }
+        return new long[] { newRequestCount, rejectedCount, learnerCount };
     }
 
     private String validateRequest(Map<String, Object> request) {
@@ -525,7 +535,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 .findByApplicationId(applicationId);
         wfEntries = wfEntries.stream().filter(wfEntry -> !configuration.getBpBatchFullValidationExcludeStates()
                         .contains(wfEntry.getCurrentStatus()))
-                .collect(Collectors.toList());
+                .toList();
         return wfEntries.size();
     }
 
@@ -544,8 +554,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 wfRequest.getCourseId());
         Map<String, Object> courseDetails = contentReadService.getServiceNameDetails(wfRequest.getCourseId());
         String serviceName = null;
-        if (courseDetails != null && courseDetails.get("wfApprovalType") != null) {
-            serviceName = (String) courseDetails.get("wfApprovalType");
+        if (courseDetails != null && courseDetails.get(Constants.WF_APPROVAL_TYPE) != null) {
+            serviceName = (String) courseDetails.get(Constants.WF_APPROVAL_TYPE);
         }
         if (serviceName == null || serviceName.isEmpty()) {
             serviceName = Constants.BLENDED_PROGRAM_SERVICE_NAME;
@@ -574,7 +584,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 wfRequest.setBatchName((String) courseBatchDetails.get(Constants.BATCH_NAME));
                 wfRequest.setBatchStartDate((Date) courseBatchDetails.get(Constants.START_DATE));
                 response = saveAdminEnrollUserIntoWfStatus(rootOrg, org, wfRequest);
-               // producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
                 producer.push(configuration.getWorkflowApplicationTopic(), wfRequest);
             }
         } else {
@@ -759,7 +768,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         );
         return allEnrollmentDetails.stream()
                 .filter(e -> e != null && e.get(Constants.ACTIVE) != null && (boolean) e.get(Constants.ACTIVE))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
@@ -807,7 +816,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             Map<String, Object> propertyMap = new HashMap<>();
             propertyMap.put(Constants.COURSE_ID, coursesList);
             propertyMap.put(Constants.BATCH_ID, batchidsList);
-            //propertyMap.put(Constants.ENROLLMENT_TYPE, Constants.INVITE_ONLY);
             List<Map<String, Object>> list= cassandraOperation.getRecordsByProperties(
                     Constants.KEYSPACE_SUNBIRD_COURSES,
                     Constants.TABLE_COURSE_BATCH,
@@ -820,7 +828,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                     .filter(item -> {
                         return item != null && item.containsKey("end_date") && item.get("end_date") != null;
                     })
-                    .collect(Collectors.toList());
+                    .toList();
         } else {
             return new ArrayList<>();
         }
@@ -865,8 +873,10 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 if (enrolResp != null
                         && "OK".equalsIgnoreCase((String) enrolResp.get(Constants.RESPONSE_CODE))) {
                     logger.info("User un-enrollment success");
+                } else if (enrolResp != null) {
+                    logger.error("user un-enrollment failed {}", ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
                 } else {
-                    logger.error("user un-enrollment failed" + ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+                    logger.error("user un-enrollment failed: no response from course service");
                 }
             } catch (Exception e) {
                 logger.error("Exception while un-enrol user");
@@ -881,8 +891,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
     private void handleEnrollmentRequest(WfRequest wfRequest) {
         Map<String, Object> courseDetails = contentReadService.getServiceNameDetails(wfRequest.getCourseId());
         String serviceName = null;
-        if (courseDetails != null && courseDetails.get("wfApprovalType") != null) {
-            serviceName = (String) courseDetails.get("wfApprovalType");
+        if (courseDetails != null && courseDetails.get(Constants.WF_APPROVAL_TYPE) != null) {
+            serviceName = (String) courseDetails.get(Constants.WF_APPROVAL_TYPE);
         }
         if (serviceName == null || serviceName.isEmpty()) {
             serviceName = wfRequest.getServiceName();
@@ -1158,7 +1168,9 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         File logFile = new File(csvFilePath);
         if (!logFile.exists()) {
             logFile.getParentFile().mkdirs();
-            logFile.createNewFile();
+            if (!logFile.createNewFile()) {
+                logger.warn("Failed to create log file: {}", csvFilePath);
+            }
         }
         try (FileWriter writer = new FileWriter(csvFilePath)) {
             if (!logs.isEmpty()) {
@@ -1179,7 +1191,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 }
             }
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
         }
         return logFile;
     }
@@ -1204,7 +1216,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
      * @return - ResponseEntity with the result of the operation
      */
     @Override
-    public ResponseEntity<?> loadApprovalDataFromCsv(MultipartFile file, String contentId) throws IOException {
+    public ResponseEntity<Object> loadApprovalDataFromCsv(MultipartFile file, String contentId) throws IOException {
         logger.info("BPWorkFlowServiceImpl::loadApprovalDataFromCsv");
         SBApiResponse response = SBApiResponse.createDefaultResponse(Constants.API_WORKFLOW_LOAD_CSV_BULK_APPROVAL);
         String fileName = file.getOriginalFilename();
@@ -1213,7 +1225,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             response.getParams().setStatus(Constants.FAILED);
             response.getParams().setErrmsg("Invalid file format. Only  CSV (.csv) files are supported.");
             response.setResponseCode(HttpStatus.BAD_REQUEST);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).<Object>body(response);
         }
         List<String> validationErrors = new ArrayList<>();
         List<Map<String, String>> validRows = validateAndExtractApprovalData(file, validationErrors);
@@ -1222,7 +1234,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             response.getParams().setStatus(Constants.FAILED);
             response.getResult().put("validationErrors", validationErrors);
             response.setResponseCode(HttpStatus.BAD_REQUEST);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).<Object>body(response);
         }
         List<String[]> updatedRows = new ArrayList<>();
         for (Map<String, String> row : validRows) {
@@ -1324,7 +1336,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             List<String> otherEmptyFields = expectedHeaders.stream()
                     .filter(header -> !header.equals(Constants.ACTION_APPROVE_REJECT) &&
                             (row.get(header) == null || row.get(header).trim().isEmpty()))
-                    .collect(Collectors.toList());
+                    .toList();
         String action = row.get(Constants.ACTION_APPROVE_REJECT);
         if (action == null) {
             errors.add("Row " + rowNumber + " is missing 'action' field.");
@@ -1383,12 +1395,13 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
     private String writeUpdatedCsv(MultipartFile originalFile, List<String[]> updatedRows) throws IOException {
         String originalFileName = originalFile.getOriginalFilename();
-        String updatedFileName = originalFileName.replace(".csv", "_updated.csv");
+        String updatedFileName = (originalFileName != null ? originalFileName : "upload.csv").replace(".csv", "_updated.csv");
         File tempFile = new File(System.getProperty("java.io.tmpdir"), updatedFileName);
         try (
                 BufferedWriter writer = Files.newBufferedWriter(tempFile.toPath());
-                CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT
-                        .withHeader(Constants.EMAIL, Constants.USER_NAME, Constants.WF_ID_CONSTANT, Constants.USER_ID, Constants.ACTION_APPROVE_REJECT, Constants.ACTION_UPDATED_NOT_UPDATED, Constants.ERROR))
+                CSVPrinter csvPrinter = new CSVPrinter(writer, CSVFormat.DEFAULT.builder()
+                        .setHeader(Constants.EMAIL, Constants.USER_NAME, Constants.WF_ID_CONSTANT, Constants.USER_ID, Constants.ACTION_APPROVE_REJECT, Constants.ACTION_UPDATED_NOT_UPDATED, Constants.ERROR)
+                        .build())
         ) {
             for (String[] row : updatedRows) {
                 csvPrinter.printRecord((Object[]) row);
@@ -1442,7 +1455,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         updatedRows.add(new String[]{emailId, userName, wfId, userId, action, resultStatus, error});
     }
 
-    private ResponseEntity<?> prepareCsvResponse(MultipartFile file, List<String[]> updatedRows) {
+    private ResponseEntity<Object> prepareCsvResponse(MultipartFile file, List<String[]> updatedRows) {
         File tempFile = null;
         try {
             String updatedFileName = writeUpdatedCsv(file, updatedRows);
@@ -1454,11 +1467,11 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + tempFile.getName())
                     .contentType(MediaType.parseMediaType("text/csv"))
                     .contentLength(fileContent.length)
-                    .body(resource);
+                    .<Object>body(resource);
         } catch (IOException e) {
             logger.error("Error writing or reading the result CSV", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new ByteArrayResource("Error generating result CSV file".getBytes()));
+                    .<Object>body(new ByteArrayResource("Error generating result CSV file".getBytes()));
         } finally {
             deleteTempFile(tempFile);
         }
@@ -1472,7 +1485,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         try {
             logger.debug("Raw response: {}", mapper.writeValueAsString(response));
         } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
+            throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
         }
         Map<String, Object> result = response.getResult();
         logger.debug("Extracted result: {}", result);
@@ -1587,7 +1600,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
         } catch (Exception e) {
             logger.error("Failed to parse update_field_values JSON: {}", updateFieldValuesJson, e);
-            return null;
+            return Collections.emptyList();
         }
     }
 
@@ -1651,111 +1664,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             }
 
             for (String userId : userIds) {
-
-                Map<String, Object> userResponse = new HashMap<>();
-                userResponse.put("userId", userId);
-                List<WfStatusEntity> activeRequests =
-                        wfStatusRepo.findActiveWorkflows(batchId, userId, Boolean.TRUE);
-                boolean blockNewNomination = false;
-                if (CollectionUtils.isNotEmpty(activeRequests)) {
-                    for (WfStatusEntity req : activeRequests) {
-                        String existingRole;
-                        if (StringUtils.isBlank(req.getActorUUID())) {
-                            logger.warn("ActorUUID missing for workflow {}, treating as SELF", req.getWfId());
-                            existingRole = Constants.SELF;
-                        } else {
-                            Map<String, Object> creatorProfile = getUserProfile(req.getActorUUID());
-                            existingRole = extractUserRole(creatorProfile);
-                        }
-
-                        logger.info("Workflow override check - existing={}, incoming={} for userId={}",
-                                existingRole, incomingRole, userId);
-
-                        if (shouldOverride(existingRole, incomingRole)) {
-                            req.setInWorkflow(false);
-                            req.setCurrentStatus("WITHDRAWN");
-                            req.setComment("Superseded by " + incomingRole + " nomination");
-                            req.setLastUpdatedOn(new Date());
-                            wfStatusRepo.save(req);
-                        } else {
-                            logger.info("Skipping nomination - existing approval by {} remains active", existingRole);
-                            userResponse.put(Constants.STATUS, Constants.ALREADY_EXISTS);
-                            processedUsers.add(userResponse);
-                            blockNewNomination = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (blockNewNomination) {
-                    continue;
-                }
-
-                WfRequest wfRequest = new WfRequest();
-                wfRequest.setApplicationId(batchId);
-                wfRequest.setCourseId(programId);
-                wfRequest.setUserId(userId);
-                wfRequest.setActorUserId(actorUserId);
-                wfRequest.setDeptName(deptName);
-                wfRequest.setServiceName(wfApproveType);
-                wfRequest.setUpdateFieldValues(buildUpdateFieldValuesWithFirstName(userId));
-
-                switch (wfApproveType) {
-                    case Constants.ONE_STEP_PC_APPROVAL:
-                    case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-                        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
-                        wfRequest.setAction(Constants.APPROVE);
-                        break;
-
-                    case Constants.ONE_STEP_MDO_APPROVAL:
-                    case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
-                        wfRequest.setState(Constants.SEND_FOR_MDO_APPROVAL);
-                        wfRequest.setAction(Constants.APPROVE);
-                        break;
-
-                    default:
-                        logger.warn("Invalid wfApproveType: {}", wfApproveType);
-                        userResponse.put(Constants.STATUS, Constants.INVALID_APPROVAL_TYPE);
-                        processedUsers.add(userResponse);
-                        continue;
-                }
-
-                Map<String, Object> batchDetailsMap = new HashMap<>();
-                if(StringUtils.isNotEmpty(primaryCategory)) {
-                    batchDetailsMap.put(Constants.PRIMARY_CATEGORY, primaryCategory);
-                }
-                String validationError = validateBatchUserRequestAccess(wfRequest, batchDetailsMap);
-                wfRequest.setBatchName((String) batchDetailsMap.get(Constants.BATCH_NAME));
-                wfRequest.setBatchStartDate((Date) batchDetailsMap.get(Constants.START_DATE));
-
-                if (StringUtils.isNotBlank(validationError)) {
-                    userResponse.put(Constants.STATUS, validationError);
-                    processedUsers.add(userResponse);
-                    continue;
-                }
-
-                if (CollectionUtils.isNotEmpty(getActiveEnrollmentForUserAndCourse(userId, programId))) {
-                    userResponse.put(Constants.STATUS, Constants.ALREADY_EXISTS);
-                    processedUsers.add(userResponse);
-                    continue;
-                }
-
-                if (scheduleConflictCheck(wfRequest)) {
-                    userResponse.put(Constants.STATUS, "SCHEDULE_CONFLICT");
-                    processedUsers.add(userResponse);
-                    continue;
-                }
-                WfStatusEntity entity = persistApprovedStateDirectly(wfRequest, rootOrg, org);
-                wfRequest.setWfId(entity.getWfId());
-                try {
-                    producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
-                    producer.push(configuration.getWorkflowApplicationTopic(), wfRequest);
-                } catch (Exception ex) {
-                    logger.error("Kafka publishing failed for userId={}", userId, ex);
-                }
-                userResponse.put("status", Constants.APPROVED);
-                userResponse.put("wfId", entity.getWfId());
-                processedUsers.add(userResponse);
+                processedUsers.add(nominateSingleUser(userId, actorUserId, batchId, programId, deptName,
+                        wfApproveType, primaryCategory, incomingRole, rootOrg, org));
             }
 
             response.put(Constants.MESSAGE, "Nomination workflow processing complete");
@@ -1766,6 +1676,109 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             logger.error("Error processing nomination", e);
             return errorResponse(e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    private Map<String, Object> nominateSingleUser(String userId, String actorUserId, String batchId, String programId,
+            String deptName, String wfApproveType, String primaryCategory, String incomingRole, String rootOrg, String org) {
+        Map<String, Object> userResponse = new HashMap<>();
+        userResponse.put("userId", userId);
+
+        List<WfStatusEntity> activeRequests = wfStatusRepo.findActiveWorkflows(batchId, userId, Boolean.TRUE);
+        if (CollectionUtils.isNotEmpty(activeRequests)
+                && isBlockedByActiveWorkflow(activeRequests, incomingRole, userId, userResponse)) {
+            return userResponse;
+        }
+
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId(batchId);
+        wfRequest.setCourseId(programId);
+        wfRequest.setUserId(userId);
+        wfRequest.setActorUserId(actorUserId);
+        wfRequest.setDeptName(deptName);
+        wfRequest.setServiceName(wfApproveType);
+        wfRequest.setUpdateFieldValues(buildUpdateFieldValuesWithFirstName(userId));
+
+        switch (wfApproveType) {
+            case Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
+                wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+                wfRequest.setAction(Constants.APPROVE);
+                break;
+
+            case Constants.ONE_STEP_MDO_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+                wfRequest.setState(Constants.SEND_FOR_MDO_APPROVAL);
+                wfRequest.setAction(Constants.APPROVE);
+                break;
+
+            default:
+                logger.warn("Invalid wfApproveType: {}", wfApproveType);
+                userResponse.put(Constants.STATUS, Constants.INVALID_APPROVAL_TYPE);
+                return userResponse;
+        }
+
+        Map<String, Object> batchDetailsMap = new HashMap<>();
+        if (StringUtils.isNotEmpty(primaryCategory)) {
+            batchDetailsMap.put(Constants.PRIMARY_CATEGORY, primaryCategory);
+        }
+        String validationError = validateBatchUserRequestAccess(wfRequest, batchDetailsMap);
+        wfRequest.setBatchName((String) batchDetailsMap.get(Constants.BATCH_NAME));
+        wfRequest.setBatchStartDate((Date) batchDetailsMap.get(Constants.START_DATE));
+
+        if (StringUtils.isNotBlank(validationError)) {
+            userResponse.put(Constants.STATUS, validationError);
+            return userResponse;
+        }
+
+        if (CollectionUtils.isNotEmpty(getActiveEnrollmentForUserAndCourse(userId, programId))) {
+            userResponse.put(Constants.STATUS, Constants.ALREADY_EXISTS);
+            return userResponse;
+        }
+
+        if (scheduleConflictCheck(wfRequest)) {
+            userResponse.put(Constants.STATUS, "SCHEDULE_CONFLICT");
+            return userResponse;
+        }
+
+        WfStatusEntity entity = persistApprovedStateDirectly(wfRequest, rootOrg, org);
+        wfRequest.setWfId(entity.getWfId());
+        try {
+            producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
+            producer.push(configuration.getWorkflowApplicationTopic(), wfRequest);
+        } catch (Exception ex) {
+            logger.error("Kafka publishing failed for userId={}", userId, ex);
+        }
+        userResponse.put("status", Constants.APPROVED);
+        userResponse.put("wfId", entity.getWfId());
+        return userResponse;
+    }
+
+    private boolean isBlockedByActiveWorkflow(List<WfStatusEntity> activeRequests, String incomingRole, String userId,
+            Map<String, Object> userResponse) {
+        for (WfStatusEntity req : activeRequests) {
+            String existingRole;
+            if (StringUtils.isBlank(req.getActorUUID())) {
+                logger.warn("ActorUUID missing for workflow {}, treating as SELF", req.getWfId());
+                existingRole = Constants.SELF;
+            } else {
+                Map<String, Object> creatorProfile = getUserProfile(req.getActorUUID());
+                existingRole = extractUserRole(creatorProfile);
+            }
+
+            logger.info("Workflow override check - existing={}, incoming={} for userId={}",
+                    existingRole, incomingRole, userId);
+
+            if (shouldOverride(existingRole, incomingRole)) {
+                req.setInWorkflow(false);
+                req.setCurrentStatus("WITHDRAWN");
+                req.setComment("Superseded by " + incomingRole + " nomination");
+                req.setLastUpdatedOn(new Date());
+                wfStatusRepo.save(req);
+            } else {
+                logger.info("Skipping nomination - existing approval by {} remains active", existingRole);
+                userResponse.put(Constants.STATUS, Constants.ALREADY_EXISTS);
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<HashMap<String, Object>> buildUpdateFieldValuesWithFirstName(String userId) {
@@ -1803,15 +1816,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         return saved;
     }
 
-    private boolean isExistingWorkflowPresent(String batchId, String userId) {
-        List<WfStatusEntity> existingRecords = wfStatusRepo.findActiveWorkflows(batchId, userId, Boolean.TRUE);
-        boolean exists = CollectionUtils.isNotEmpty(existingRecords);
-        if (exists) {
-            logger.warn("Active workflow already exists for userId: {} batchId: {}", userId, batchId);
-        }
-        return exists;
-    }
-
     private String getFirstName(String userId) {
         Map<String, Object> userData = userUtils.userProfileRead(userId);
 
@@ -1841,7 +1845,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 .filter(e -> e != null
                         && e.get(Constants.ACTIVE) != null
                         && (boolean) e.get(Constants.ACTIVE))
-                .collect(Collectors.toList());
+                .toList();
     }
 
 
@@ -1904,7 +1908,10 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                     }
                 }
             }
-        } catch (Exception ignore) {}
+        } catch (Exception e) {
+            // Profile data shape is unreliable across sources; fall back to SELF role on any parsing issue.
+            logger.debug("Unable to extract user role from profile", e);
+        }
 
         return Constants.SELF;
     }
@@ -1938,12 +1945,15 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
     private void reverseApprovedRequest(WfRequest wfRequest) {
         WfStatusEntity applicationStatus = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(), wfRequest.getWfId());
-        if (applicationStatus != null && applicationStatus.getCreatedOn() != null) {
+        if (applicationStatus == null) {
+            return;
+        }
+        if (applicationStatus.getCreatedOn() != null) {
             wfRequest.setCreatedOn(applicationStatus.getCreatedOn().toString());
         }
         applicationStatus.setLastUpdatedOn(new Date());
         applicationStatus.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
-        WfStatusEntity savedEntity = wfStatusRepo.save(applicationStatus);
+        wfStatusRepo.save(applicationStatus);
     }
 
     private boolean isVolunteerUser(String userUUID) {
@@ -1972,7 +1982,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         }
 
         List<String> courseIds = (List<String>) eligibility.get(Constants.COURSEIDS);
-        logger.info("courseIds in orgEligibilityIndex -> " + courseIds.toString());
+        logger.info("courseIds in orgEligibilityIndex -> {}", courseIds);
         return !CollectionUtils.isEmpty(courseIds)
                 && courseIds.contains(courseId);
     }

@@ -6,6 +6,9 @@ import java.security.*;
 public class CryptoUtil {
     private static final Charset US_ASCII = Charset.forName("US-ASCII");
 
+    private CryptoUtil() {
+    }
+
     public static boolean verifyRSASign(String payLoad, byte[] signature, PublicKey key, String algorithm) {
         Signature sign;
         try {

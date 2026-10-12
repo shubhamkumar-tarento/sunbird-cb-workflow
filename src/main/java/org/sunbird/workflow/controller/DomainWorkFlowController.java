@@ -1,6 +1,6 @@
 package org.sunbird.workflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,10 +13,10 @@ import org.sunbird.workflow.service.DomainWhiteListWorkFlowService;
 
 @RestController
 @RequestMapping("/v1/domain/workflow")
+@RequiredArgsConstructor
 public class DomainWorkFlowController {
 
-    @Autowired
-    private DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
+    private final DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
 
     @PostMapping("/create")
     public ResponseEntity<Response> domainWfCreate(@RequestHeader String rootOrg, @RequestHeader String org,

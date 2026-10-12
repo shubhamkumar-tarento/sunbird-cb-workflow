@@ -4,6 +4,7 @@ package org.sunbird.workflow.service.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
@@ -46,7 +47,6 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class WorkflowServiceImplTest {
 
-    @InjectMocks
     private WorkflowServiceImpl workflowServiceImpl;
 
     @Mock
@@ -90,9 +90,18 @@ class WorkflowServiceImplTest {
     @Captor
     ArgumentCaptor<String> uriCaptor;
 
-    @Spy // we spy here to mock getWorkFlowConfig and test getWfStatus
-    @InjectMocks
+    // we spy here to mock getWorkFlowConfig and test getWfStatus
     private WorkflowServiceImpl spyWorkflowServiceImpl;
+
+    @BeforeEach
+    void setUp() {
+        workflowServiceImpl = new WorkflowServiceImpl(wfStatusRepo, wfAuditRepo, mapper, configuration,
+                userProfileWfService, requestServiceImpl, producer, cassandraOperation, accessTokenValidator,
+                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService);
+        spyWorkflowServiceImpl = Mockito.spy(new WorkflowServiceImpl(wfStatusRepo, wfAuditRepo, mapper, configuration,
+                userProfileWfService, requestServiceImpl, producer, cassandraOperation, accessTokenValidator,
+                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService));
+    }
 
     @Test
     void getUserWf_shouldReturnWfStatusEntities() {

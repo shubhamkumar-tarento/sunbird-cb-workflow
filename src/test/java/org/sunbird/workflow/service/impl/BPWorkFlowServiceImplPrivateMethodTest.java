@@ -16,6 +16,12 @@ import org.sunbird.workflow.exception.InvalidDataInputException;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
+import org.sunbird.workflow.producer.Producer;
+import org.sunbird.workflow.service.ContentReadService;
+import org.sunbird.workflow.service.Workflowservice;
+import org.sunbird.workflow.utils.CassandraOperation;
+import org.sunbird.workflow.utils.ElasticsearchServiceManager;
+import org.sunbird.workflow.utils.UserUtil;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -37,7 +43,7 @@ class BPWorkFlowServiceImplPrivateMethodTest {
 
     @BeforeEach
     void setUp() {
-        bpWorkFlowService = new BPWorkFlowServiceImpl();
+        bpWorkFlowService = newBPWorkFlowServiceImpl();
         configuration = mock(Configuration.class);
         when(configuration.getSunbirdTimeZone()).thenReturn(TIMEZONE_STRING);
         try {
@@ -53,6 +59,13 @@ class BPWorkFlowServiceImplPrivateMethodTest {
         }
     }
 
+    private static BPWorkFlowServiceImpl newBPWorkFlowServiceImpl() {
+        return new BPWorkFlowServiceImpl(mock(Workflowservice.class), mock(CassandraOperation.class),
+                mock(RequestServiceImpl.class), mock(Configuration.class), mock(WfStatusRepo.class),
+                new ObjectMapper(), mock(Producer.class), mock(ContentReadService.class), mock(UserUtil.class),
+                mock(ElasticsearchServiceManager.class));
+    }
+
     private String invokeProcessApprovalStatus(Response response, String wfId) throws Exception {
         Method method = BPWorkFlowServiceImpl.class.getDeclaredMethod("processApprovalStatus", Response.class, String.class);
         method.setAccessible(true);
@@ -62,7 +75,7 @@ class BPWorkFlowServiceImplPrivateMethodTest {
     @Test
     void testProcessApprovalStatus_okStatus_returnsUpdated() throws Exception {
         // Setup
-        BPWorkFlowServiceImpl service = new BPWorkFlowServiceImpl();
+        BPWorkFlowServiceImpl service = newBPWorkFlowServiceImpl();
         ObjectMapper newMapper = new ObjectMapper();
         setField(service, "mapper", newMapper);
 
@@ -464,17 +477,17 @@ class BPWorkFlowServiceImplPrivateMethodTest {
     @Test
     void testSaveAdminEnrollUserIntoWfStatus() throws Exception {
         // Create instance of class under test
-        BPWorkFlowServiceImpl service = new BPWorkFlowServiceImpl();
+        BPWorkFlowServiceImpl service = newBPWorkFlowServiceImpl();
 
         // Mock dependencies
         WfStatusRepo wfStatusRepo = mock(WfStatusRepo.class);
         ObjectMapper newMapper = mock(ObjectMapper.class);
-        Configuration configuration = mock(Configuration.class);
+        Configuration localConfiguration = mock(Configuration.class);
 
         // Inject mocks via reflection
         setPrivateField(service, "wfStatusRepo", wfStatusRepo);
         setPrivateField(service, "mapper", newMapper);
-        setPrivateField(service, "configuration", configuration);
+        setPrivateField(service, "configuration", localConfiguration);
 
         // Prepare test data
         String rootOrg = "rootOrg";

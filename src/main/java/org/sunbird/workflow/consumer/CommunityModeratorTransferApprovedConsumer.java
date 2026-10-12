@@ -7,35 +7,31 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
+import lombok.RequiredArgsConstructor;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.WfRequest;
-import org.sunbird.workflow.service.UserProfileWfService;
 import org.sunbird.workflow.service.impl.NotificationServiceImpl;
 import org.sunbird.workflow.service.impl.RequestServiceImpl;
 import org.sunbird.workflow.service.impl.UserProfileWfServiceImpl;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 import org.springframework.util.CollectionUtils;
-import org.sunbird.workflow.service.impl.WorkflowServiceImpl;
 
 @Service
+@RequiredArgsConstructor
 public class CommunityModeratorTransferApprovedConsumer {
 
     private static final Logger logger = LogManager.getLogger(CommunityModeratorTransferApprovedConsumer.class);
 
-    @Autowired private ObjectMapper mapper;
-    @Autowired private Configuration configuration;
-    @Autowired private RequestServiceImpl requestServiceImpl;
-    @Autowired private UserProfileWfServiceImpl userProfileWfService;
-    @Autowired private NotificationServiceImpl notificationUtil;
+    private final ObjectMapper mapper;
+    private final Configuration configuration;
+    private final RequestServiceImpl requestServiceImpl;
+    private final UserProfileWfServiceImpl userProfileWfService;
+    private final NotificationServiceImpl notificationUtil;
 
     @KafkaListener(topics = "${kafka.topics.community.moderator.transfer}", groupId = "community-moderator-transfer-group")
     public void processMessage(ConsumerRecord<String, String> data) {
@@ -150,6 +146,6 @@ public class CommunityModeratorTransferApprovedConsumer {
                 .filter(map -> map.containsKey(Constants.DISCUSSION_COMMUNITIES))
                 .flatMap(map -> ((List<String>) map.get(Constants.DISCUSSION_COMMUNITIES)).stream())
                 .distinct()
-                .collect(Collectors.toList());
+                .toList();
     }
 }

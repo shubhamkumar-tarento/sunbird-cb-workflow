@@ -5,7 +5,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -19,9 +18,7 @@ import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.AiAssessmentApprovalEvent;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.producer.Producer;
-import org.sunbird.workflow.service.Workflowservice;
 import org.sunbird.workflow.service.impl.RequestServiceImpl;
-import org.sunbird.workflow.utils.AccessTokenValidator;
 
 import java.util.ArrayList;
 import java.util.HashMap;

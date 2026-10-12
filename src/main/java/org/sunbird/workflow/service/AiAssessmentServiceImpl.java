@@ -1,8 +1,10 @@
 package org.sunbird.workflow.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -15,11 +17,18 @@ import org.sunbird.workflow.models.AiAssessmentApprovalEvent;
 import org.sunbird.workflow.models.Response;
 import org.sunbird.workflow.models.SearchCriteria;
 import org.sunbird.workflow.models.WfRequest;
+import org.sunbird.workflow.postgres.entity.WfStatusCountDTO;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
+import org.sunbird.workflow.postgres.repo.WfAuditRepo;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
 import org.sunbird.workflow.producer.Producer;
+import org.sunbird.workflow.service.impl.RequestServiceImpl;
 import org.sunbird.workflow.service.impl.WorkflowServiceImpl;
 import org.sunbird.workflow.utils.AccessTokenValidator;
+import org.sunbird.workflow.utils.CassandraOperation;
+import org.sunbird.workflow.utils.ElasticsearchServiceManager;
+import org.sunbird.workflow.utils.LRUCache;
+import org.sunbird.workflow.utils.NotificationTriggerService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +38,7 @@ import java.util.stream.Collectors;
 @Service
 public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
 
-    private static final Logger log = LogManager.getLogger(AiAssessmentServiceImpl.class);
+    private static final Logger aiLog = LogManager.getLogger(AiAssessmentServiceImpl.class);
 
     private final AccessTokenValidator accessTokenValidator;
     private final Configuration configuration;
@@ -37,9 +46,16 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
     private final UserProfileWfService userProfileWfService;
     private final Producer producer;
 
-    public AiAssessmentServiceImpl(AccessTokenValidator accessTokenValidator, Configuration configuration,
-                                   WfStatusRepo wfStatusRepo, UserProfileWfService userProfileWfService,
-                                   Producer producer) {
+    public AiAssessmentServiceImpl(WfStatusRepo wfStatusRepo, WfAuditRepo wfAuditRepo, ObjectMapper mapper,
+                                   Configuration configuration, @Lazy UserProfileWfService userProfileWfService,
+                                   RequestServiceImpl requestServiceImpl, Producer producer,
+                                   CassandraOperation cassandraOperation, AccessTokenValidator accessTokenValidator,
+                                   LRUCache<String, List<WfStatusCountDTO>> localCache, StorageService storageService,
+                                   Producer kafkaProducer, ElasticsearchServiceManager eServiceManager,
+                                   NotificationTriggerService notificationTriggerService) {
+        super(wfStatusRepo, wfAuditRepo, mapper, configuration, userProfileWfService, requestServiceImpl, producer,
+                cassandraOperation, accessTokenValidator, localCache, storageService, kafkaProducer, eServiceManager,
+                notificationTriggerService);
         this.accessTokenValidator = accessTokenValidator;
         this.configuration = configuration;
         this.wfStatusRepo = wfStatusRepo;
@@ -49,14 +65,14 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
 
     public Response aiAssessmentWorkflowTransition(WfRequest wfRequest, String token) {
         List<String> actorRoles = accessTokenValidator.fetchUserRolesFromToken(token);
-        log.info("Actor roles: {}", actorRoles);
+        aiLog.info("Actor roles: {}", actorRoles);
         validateRoles(wfRequest.getAction(), actorRoles);
         validateAiAssessmentWfRequest(wfRequest);
         Response response = workflowTransition(wfRequest.getRootOrgId(), wfRequest.getRootOrgId(), wfRequest);
         if (Constants.APPROVE.equalsIgnoreCase(wfRequest.getAction())) {
             producer.push(configuration.getAiAssessmentTopic(),
                     new AiAssessmentApprovalEvent(wfRequest, token));
-            log.info("Pushed to AI Assessment topic for APPROVED userId: {}", wfRequest.getUserId());
+            aiLog.info("Pushed to AI Assessment topic for APPROVED userId: {}", wfRequest.getUserId());
         }
         return response;
     }
@@ -69,7 +85,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
             boolean hasRole = actorRoles.stream()
                     .anyMatch(initiateRoles::contains);
             if (!hasRole) {
-                log.error("Unauthorized INITIATE by roles: {}", actorRoles);
+                aiLog.error("Unauthorized INITIATE by roles: {}", actorRoles);
                 throw new BadRequestException(
                         "Roles " + initiateRoles +
                                 " are allowed to initiate AI Assessment requests");
@@ -80,7 +96,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
             boolean hasRole = actorRoles.stream()
                     .anyMatch(approveRejectRoles::contains);
             if (!hasRole) {
-                log.error("Unauthorized {} by roles: {}", action, actorRoles);
+                aiLog.error("Unauthorized {} by roles: {}", action, actorRoles);
                 throw new BadRequestException(
                         "Roles " + approveRejectRoles +
                                 " are allowed to approve or reject " +
@@ -99,7 +115,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
         }
 
         List<String> actorRoles = accessTokenValidator.fetchUserRolesFromToken(token);
-        log.info("Actor: {} roles: {}", actorUserId, actorRoles);
+        aiLog.info("Actor: {} roles: {}", actorUserId, actorRoles);
 
         List<String> approveRejectRoles = configuration.getAiAssessmentApproveRejectRoles();
         boolean hasRole = actorRoles.stream().anyMatch(approveRejectRoles::contains);
@@ -110,9 +126,10 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
     }
 
     public Response getAiAssessmentRequestByUserId(String token) {
+        String userId = null;
         try {
             validateTokenAndRoles(token, configuration.getAiAssessmentInitiateRoles());
-            String userId = accessTokenValidator.fetchUserIdFromAccessToken(token);
+            userId = accessTokenValidator.fetchUserIdFromAccessToken(token);
             if (StringUtils.isEmpty(userId)) {
                 throw new BadRequestException("Invalid or expired token");
             }
@@ -145,7 +162,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
             return response;
 
         } catch (Exception e) {
-            log.error("Error fetching AI Assessment request for userId: {}", e);
+            aiLog.error("Error fetching AI Assessment request for userId: {}", userId, e);
             throw new ApplicationException(
                     "Error fetching AI Assessment request for user", e);
         }
@@ -160,7 +177,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
 
         List<String> actorRoles = accessTokenValidator
                 .fetchUserRolesFromToken(token);
-        log.info("Actor: {} roles: {}", actorUserId, actorRoles);
+        aiLog.info("Actor: {} roles: {}", actorUserId, actorRoles);
 
         boolean hasRole = actorRoles.stream()
                 .anyMatch(allowedRoles::contains);
@@ -196,7 +213,7 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
         if (CollectionUtils.isEmpty(wfRequest.getUpdateFieldValues())) {
             throw new InvalidDataInputException("updateFieldValues is mandatory");
         }
-        log.info("AI Assessment WfRequest validation passed for userId: {}",
+        aiLog.info("AI Assessment WfRequest validation passed for userId: {}",
                 wfRequest.getUserId());
     }
 }

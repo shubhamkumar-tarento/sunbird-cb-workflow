@@ -1,6 +1,6 @@
 package org.sunbird.workflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -12,10 +12,10 @@ import org.sunbird.workflow.service.OrganisationWorkFlowService;
 
 @RestController
 @RequestMapping("/v1/org/workflow")
+@RequiredArgsConstructor
 public class OrganisationWorkFlowController {
 
-    @Autowired
-    private OrganisationWorkFlowService organisationWorkFlowService;
+    private final OrganisationWorkFlowService organisationWorkFlowService;
 
     @PostMapping("/create")
     public ResponseEntity<Response> orgWfCreate(@RequestHeader String rootOrg, @RequestHeader String org,

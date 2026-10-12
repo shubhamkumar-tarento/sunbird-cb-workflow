@@ -1,7 +1,7 @@
 package org.sunbird.workflow.service;
 
 import java.io.*;
-import java.sql.Timestamp;
+import java.nio.file.Files;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.util.*;
@@ -20,9 +20,9 @@ import org.apache.poi.ss.util.NumberToTextConverter;
 import org.apache.poi.xssf.usermodel.XSSFRow;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -46,39 +46,24 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
+@RequiredArgsConstructor
 public class UserBulkUploadService {
     private final Logger logger = LoggerFactory.getLogger(UserBulkUploadService.class);
     ObjectMapper objectMapper = new ObjectMapper();
 
-    @Autowired
-    Configuration configuration;
+    private static final String DIFFERENT_MDO_ORG_ERROR = "The User belongs to a different MDO Organisation";
+    private static final String INVALID_DOB_FORMAT_ERROR = "Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy";
 
-    @Autowired
-    CassandraOperation cassandraOperation;
+    private final Configuration configuration;
+    private final CassandraOperation cassandraOperation;
+    private final RequestServiceImpl requestServiceImpl;
 
-    @Autowired
-    private RequestServiceImpl requestServiceImpl;
-
-//    @Autowired
-//    UserUtilityService userUtilityService;
-
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    UserProfileWfService userProfileWfService;
-
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    StorageService storageService;
-
-    @Autowired
-    RedisCacheMgr redisCacheMgr;
-
-    @Autowired
-    private UserUtil userUtil;
+    private final WfStatusRepo wfStatusRepo;
+    private final UserProfileWfService userProfileWfService;
+    private final ObjectMapper mapper;
+    private final StorageService storageService;
+    private final RedisCacheMgr redisCacheMgr;
+    private final UserUtil userUtil;
 
     public void initiateUserBulkUploadProcess(String inputData) {
         logger.info("UserBulkUploadService:: initiateUserBulkUploadProcess: Started");
@@ -139,14 +124,12 @@ public class UserBulkUploadService {
             cassandraOperation.updateRecord(Constants.KEYSPACE_SUNBIRD, Constants.TABLE_USER_BULK_UPDATE,
                     fieldsToBeUpdated, compositeKeys);
         } catch (Exception e) {
-            logger.error(String.format("Error in Updating User Bulk Upload Status in Cassandra %s", e.getMessage()), e);
+            logger.error("Error in Updating User Bulk Upload Status in Cassandra {}", e.getMessage(), e);
         }
     }
 
     private void processBulkUpload(HashMap<String, String> inputDataMap) throws IOException {
         File file = null;
-        FileInputStream fis = null;
-        XSSFWorkbook wb = null;
         int totalRecordsCount = 0;
         int noOfSuccessfulRecords = 0;
         int failedRecordsCount = 0;
@@ -154,8 +137,8 @@ public class UserBulkUploadService {
         try {
             file = new File(Constants.LOCAL_BASE_PATH + inputDataMap.get(Constants.FILE_NAME));
             if (file.exists() && file.length() > 0) {
-                fis = new FileInputStream(file);
-                wb = new XSSFWorkbook(fis);
+            try (FileInputStream fis = new FileInputStream(file);
+                 XSSFWorkbook wb = new XSSFWorkbook(fis)) {
                 XSSFSheet sheet = wb.getSheetAt(0);
                 Iterator<Row> rowIterator = sheet.iterator();
                 // incrementing the iterator inorder to skip the headers in the first row
@@ -177,7 +160,7 @@ public class UserBulkUploadService {
                     logger.info("UserBulkUploadService:: Record {}" , count++);
                     long duration = 0;
                     long startTime = System.currentTimeMillis();
-                    StringBuffer str = new StringBuffer();
+                    StringBuilder str = new StringBuilder();
                     List<String> errList = new ArrayList<>();
                     Row nextRow = rowIterator.next();
                     if (nextRow == null) {
@@ -236,7 +219,7 @@ public class UserBulkUploadService {
                     } else {
                         errList.add("Mobile Number is Missing");
                     }
-                    if (!StringUtils.isEmpty(phoneNumber)) {
+                    if (StringUtils.hasLength(phoneNumber)) {
                         isValidPhoneNumber = ValidationUtil.validateContactPattern(phoneNumber);
                         if (isValidPhoneNumber) {
                             userDetailsForMobile = new HashMap<>();
@@ -247,7 +230,7 @@ public class UserBulkUploadService {
                             errList.add("The Mobile Number provided is Invalid");
                         }
                     }
-                    if (!StringUtils.isEmpty(phoneNumber) && isEmailValid) {
+                    if (StringUtils.hasLength(phoneNumber) && isEmailValid) {
                         filters = new HashMap<>();
                         filters.put(Constants.EMAIL, email);
                         filters.put(Constants.PHONE, phoneNumber);
@@ -268,7 +251,7 @@ public class UserBulkUploadService {
                         String userRootOrgId = (String) userDetails.get(Constants.ROOT_ORG_ID);
                         String mdoAdminRootOrgId = inputDataMap.get(Constants.ROOT_ORG_ID);
                         if (!mdoAdminRootOrgId.equalsIgnoreCase(userRootOrgId)) {
-                            errList.add("The User belongs to a different MDO Organisation");
+                            errList.add(DIFFERENT_MDO_ORG_ERROR);
                             this.setErrorDetails(str, errList, statusCell, errorDetails);
                             failedRecordsCount++;
                             totalRecordsCount++;
@@ -281,178 +264,21 @@ public class UserBulkUploadService {
                         totalRecordsCount++;
                         continue;
                     }
-                    if (nextRow.getCell(0) != null && nextRow.getCell(0).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(0).getCellType() == CellType.STRING) {
-                            valuesToBeUpdate.put(Constants.FIRSTNAME, nextRow.getCell(0).getStringCellValue().trim());
-                            if (!ValidationUtil.validateFullName(nextRow.getCell(0).getStringCellValue().trim())) {
-                                errList.add("Invalid Full Name");
-                            }
-                        } else {
-                            errList.add("Invalid value for Full Name type. Expecting string format");
-                        }
-                    }
+                    validateFullNameColumn(nextRow, valuesToBeUpdate, errList);
                     if (!isEmailOrPhoneNumberExist) {
                         valuesToBeUpdate.put(Constants.MOBILE, phoneNumber);
                     }
-                    if (nextRow.getCell(3) != null && nextRow.getCell(3).getCellType() != CellType.BLANK) {
-                        String groupValue = null;
-                        if (nextRow.getCell(3).getCellType() == CellType.STRING) {
-                            groupValue = nextRow.getCell(3).getStringCellValue().trim();
-                            valuesToBeUpdate.put(Constants.GROUP, groupValue);
-                        } else {
-                            errList.add("Invalid value for Group type. Expecting string format");
-                        }
-                        if (!this.validateGroupValue(groupValue)) {
-                            errList.add("invalid value of Group Type, please choose a valid value from the default list");
-                        }
-                    }
-                    if (nextRow.getCell(4) != null && nextRow.getCell(4).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(4).getCellType() == CellType.STRING) {
-                            String designation = nextRow.getCell(4).getStringCellValue().trim();
-                            valuesToBeUpdate.put(Constants.DESIGNATION, designation);
-                            if (org.apache.commons.lang.StringUtils.isNotBlank(designation)) {
-                                if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(designation)) {
-                                    errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
-                                }
-                                if(this.validateDesignationFieldValue(designation)){
-                                    errList.add("Invalid Value of Designation, please choose a valid value from the default list");
-                                }
-                            }
-                        } else {
-                            errList.add("Invalid value for Designation type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(5) != null && nextRow.getCell(5).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(5).getCellType() == CellType.STRING) {
-                            if (validateGender(nextRow.getCell(5).getStringCellValue().trim())) {
-                                valuesToBeUpdate.put(Constants.GENDER, nextRow.getCell(5).getStringCellValue().trim());
-                            } else {
-                                errList.add("Invalid Gender : Gender can be only among one of these " + configuration.getBulkUploadGenderValue());
-                            }
-
-                        } else {
-                            errList.add("Invalid value for Gender type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(6) != null && nextRow.getCell(6).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(6).getCellType() == CellType.STRING) {
-                            if (validateCategory(nextRow.getCell(6).getStringCellValue().trim())) {
-                                valuesToBeUpdate.put(Constants.CATEGORY, nextRow.getCell(6).getStringCellValue().trim());
-                            } else {
-                                errList.add("Invalid Category : Category can be only among one of these " + configuration.getBulkUploadCategoryValue());
-                            }
-                        } else {
-                            errList.add("Invalid value for Category type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(7) != null && nextRow.getCell(7).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(7).getCellType() == CellType.STRING) {
-                            if (ValidationUtil.validateDate(nextRow.getCell(7).getStringCellValue().trim())) {
-                                valuesToBeUpdate.put(Constants.DOB, nextRow.getCell(7).getStringCellValue().trim());
-                            } else {
-                                errList.add("Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy");
-                            }
-                        } else if (nextRow.getCell(7).getCellType() == CellType.NUMERIC) {
-                            if (DateUtil.isCellDateFormatted(nextRow.getCell(7))) {
-                                Date date = nextRow.getCell(7).getDateCellValue();
-                                SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
-                                String dob = dateFormat.format(date);
-                                if (ValidationUtil.validateDate(dob)) {
-                                    valuesToBeUpdate.put(Constants.DOB, dob);
-                                } else {
-                                    errList.add("Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy");
-                                }
-                            } else {
-                                errList.add("Cell is numeric but not a date.");
-                            }
-                        } else {
-                            errList.add("Invalid value for Date of Birth type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(8) != null && nextRow.getCell(8).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(8).getCellType() == CellType.STRING) {
-                            String language = nextRow.getCell(8).getStringCellValue().trim();
-                            valuesToBeUpdate.put(Constants.DOMICILE_MEDIUM, language);
-                            if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(language) || this.validateFieldValue("languages", language)) {
-                                errList.add("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)");
-                            }
-                        } else {
-                            errList.add("Invalid value for Mother Tongue type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(9) != null && nextRow.getCell(9).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(9).getCellType() == CellType.NUMERIC) {
-                            valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, NumberToTextConverter.toText(nextRow.getCell(9).getNumericCellValue()).trim());
-                        } else if (nextRow.getCell(9).getCellType() == CellType.STRING) {
-                            valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, nextRow.getCell(9).getStringCellValue().trim());
-                        } else {
-                            errList.add("Invalid value for Employee ID type. Expecting string/number format");
-                        }
-                        if (!StringUtils.isEmpty(valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))) {
-                            if (!ValidationUtil.validateEmployeeId((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE)))
-                                errList.add("Invalid Employee ID : Employee ID can contain alphabetic, alphanumeric numeric character(s) and have a max length of 30");
-                        }
-                    }
-                    if (nextRow.getCell(10) != null && nextRow.getCell(10).getCellType() != CellType.BLANK) {
-                        String pinCode = "";
-                        if (nextRow.getCell(10).getCellType() == CellType.NUMERIC) {
-                            pinCode = NumberToTextConverter.toText(nextRow.getCell(10).getNumericCellValue());
-                            valuesToBeUpdate.put(Constants.PIN_CODE, pinCode);
-                        } else if (nextRow.getCell(10).getCellType() == CellType.STRING) {
-                            pinCode = nextRow.getCell(10).getStringCellValue().trim();
-                            valuesToBeUpdate.put(Constants.PIN_CODE, pinCode);
-                        } else {
-                            errList.add("Invalid value for Office Pin Code type. Expecting number/string format");
-                        }
-                        if (org.apache.commons.lang.StringUtils.isNotBlank(pinCode)) {
-                            if (!ValidationUtil.validatePinCode(pinCode)) {
-                                errList.add("Invalid Office Pin Code : Office Pin Code should be numeric and is of 6 digit.");
-                            }
-                        }
-                    }
-                    if (nextRow.getCell(11) != null && nextRow.getCell(11).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(11).getCellType() == CellType.NUMERIC) {
-                            valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, NumberToTextConverter.toText(nextRow.getCell(11).getNumericCellValue()).trim());
-                            if (!ValidationUtil.validateExternalSystemId((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM_ID))) {
-                                errList.add("Invalid External System ID : External System Id can contain alphanumeric characters and have a max length of 30");
-                            }
-                        } else if (nextRow.getCell(11).getCellType() == CellType.STRING) {
-                            valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, nextRow.getCell(11).getStringCellValue().trim());
-                            if (!ValidationUtil.validateExternalSystemId((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM_ID))) {
-                                errList.add("Invalid External System ID : External System Id can contain alphanumeric characters and have a max length of 30");
-                            }
-                        } else {
-                            errList.add("Invalid value for External System ID type. Expecting string/number format");
-                        }
-                    }
-                    if (nextRow.getCell(12) != null && !org.apache.commons.lang.StringUtils.isBlank(nextRow.getCell(12).toString())) {
-                        if (nextRow.getCell(12).getCellType() == CellType.STRING) {
-                            valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM, nextRow.getCell(12).getStringCellValue().trim());
-                            if (!ValidationUtil.validateExternalSystem((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM))) {
-                                errList.add("Invalid External System Name : External System Name can contain only alphabets and can have a max length of 255");
-                            }
-                        } else {
-                            errList.add("Invalid value for External System Name type. Expecting string format");
-                        }
-                    }
-                    if (nextRow.getCell(13) != null && nextRow.getCell(13).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(13).getCellType() == CellType.STRING) {
-                            String tagStr = nextRow.getCell(13).getStringCellValue().trim();
-                            List<String> tagList = new ArrayList<String>();
-                            if (!org.apache.commons.lang.StringUtils.isEmpty(tagStr)) {
-                                String[] tagStrList = tagStr.split(",", -1);
-                                for(String tag : tagStrList) {
-                                    tagList.add(tag.trim());
-                                }
-                            }
-                            valuesToBeUpdate.put(Constants.TAG, tagList);
-                            if (!ValidationUtil.validateTag((List<String>)valuesToBeUpdate.get(Constants.TAG))) {
-                                errList.add("Invalid Tag : Tags are comma separated string values. A Tag can contain only alphabets with spaces. eg: Bihar Circle, Patna Division");
-                            }
-                        } else {
-                            errList.add("Invalid value for Tags type. Expecting string format");
-                        }
-                    }
+                    validateGroupColumn(nextRow, valuesToBeUpdate, errList);
+                    validateDesignationColumn(nextRow, valuesToBeUpdate, errList);
+                    validateGenderColumn(nextRow, valuesToBeUpdate, errList);
+                    validateCategoryColumn(nextRow, valuesToBeUpdate, errList);
+                    validateDobColumn(nextRow, valuesToBeUpdate, errList);
+                    validateMotherTongueColumn(nextRow, valuesToBeUpdate, errList);
+                    validateEmployeeIdColumn(nextRow, valuesToBeUpdate, errList);
+                    validatePinCodeColumn(nextRow, valuesToBeUpdate, errList);
+                    validateExternalSystemIdColumn(nextRow, valuesToBeUpdate, errList);
+                    validateExternalSystemColumn(nextRow, valuesToBeUpdate, errList);
+                    validateTagColumn(nextRow, valuesToBeUpdate, errList);
                     if(!CollectionUtils.isEmpty(errList)){
                         this.setErrorDetails(str, errList, statusCell, errorDetails);
                         failedRecordsCount++;
@@ -573,6 +399,7 @@ public class UserBulkUploadService {
                         && totalRecordsCount == noOfSuccessfulRecords && totalRecordsCount >= 1)) {
                     status = Constants.FAILED_UPPERCASE;
                 }
+            }
             } else {
                 logger.info("Error in Process Bulk Upload : The File is not downloaded/present");
                 status = Constants.FAILED_UPPERCASE;
@@ -580,20 +407,224 @@ public class UserBulkUploadService {
             this.updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
                     status, totalRecordsCount, noOfSuccessfulRecords, failedRecordsCount);
         } catch (Exception e) {
-            logger.error(String.format("Error in Process Bulk Upload %s", e.getMessage()), e);
+            logger.error("Error in Process Bulk Upload {}", e.getMessage(), e);
             this.updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
                     Constants.FAILED_UPPERCASE, 0, 0, 0);
         } finally {
-            if (wb != null)
-                wb.close();
-            if (fis != null)
-                fis.close();
-            if (file != null)
-                file.delete();
+            if (file != null) {
+                try {
+                    Files.delete(file.toPath());
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
+                }
+            }
         }
     }
 
-    private void setErrorDetails(StringBuffer str, List<String> errList, Cell statusCell, Cell errorDetails) {
+    private void validateFullNameColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(0) != null && nextRow.getCell(0).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(0).getCellType() == CellType.STRING) {
+                valuesToBeUpdate.put(Constants.FIRSTNAME, nextRow.getCell(0).getStringCellValue().trim());
+                if (!ValidationUtil.validateFullName(nextRow.getCell(0).getStringCellValue().trim())) {
+                    errList.add("Invalid Full Name");
+                }
+            } else {
+                errList.add("Invalid value for Full Name type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateGroupColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(3) != null && nextRow.getCell(3).getCellType() != CellType.BLANK) {
+            String groupValue = null;
+            if (nextRow.getCell(3).getCellType() == CellType.STRING) {
+                groupValue = nextRow.getCell(3).getStringCellValue().trim();
+                valuesToBeUpdate.put(Constants.GROUP, groupValue);
+            } else {
+                errList.add("Invalid value for Group type. Expecting string format");
+            }
+            if (!this.validateGroupValue(groupValue)) {
+                errList.add("invalid value of Group Type, please choose a valid value from the default list");
+            }
+        }
+    }
+
+    private void validateDesignationColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(4) != null && nextRow.getCell(4).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(4).getCellType() == CellType.STRING) {
+                String designation = nextRow.getCell(4).getStringCellValue().trim();
+                valuesToBeUpdate.put(Constants.DESIGNATION, designation);
+                if (org.apache.commons.lang.StringUtils.isNotBlank(designation)) {
+                    if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(designation)) {
+                        errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
+                    }
+                    if(this.validateDesignationFieldValue(designation)){
+                        errList.add("Invalid Value of Designation, please choose a valid value from the default list");
+                    }
+                }
+            } else {
+                errList.add("Invalid value for Designation type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateGenderColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(5) != null && nextRow.getCell(5).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(5).getCellType() == CellType.STRING) {
+                if (validateGender(nextRow.getCell(5).getStringCellValue().trim())) {
+                    valuesToBeUpdate.put(Constants.GENDER, nextRow.getCell(5).getStringCellValue().trim());
+                } else {
+                    errList.add("Invalid Gender : Gender can be only among one of these " + configuration.getBulkUploadGenderValue());
+                }
+
+            } else {
+                errList.add("Invalid value for Gender type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateCategoryColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(6) != null && nextRow.getCell(6).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(6).getCellType() == CellType.STRING) {
+                if (validateCategory(nextRow.getCell(6).getStringCellValue().trim())) {
+                    valuesToBeUpdate.put(Constants.CATEGORY, nextRow.getCell(6).getStringCellValue().trim());
+                } else {
+                    errList.add("Invalid Category : Category can be only among one of these " + configuration.getBulkUploadCategoryValue());
+                }
+            } else {
+                errList.add("Invalid value for Category type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateDobColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(7) != null && nextRow.getCell(7).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(7).getCellType() == CellType.STRING) {
+                if (ValidationUtil.validateDate(nextRow.getCell(7).getStringCellValue().trim())) {
+                    valuesToBeUpdate.put(Constants.DOB, nextRow.getCell(7).getStringCellValue().trim());
+                } else {
+                    errList.add(INVALID_DOB_FORMAT_ERROR);
+                }
+            } else if (nextRow.getCell(7).getCellType() == CellType.NUMERIC) {
+                if (DateUtil.isCellDateFormatted(nextRow.getCell(7))) {
+                    Date date = nextRow.getCell(7).getDateCellValue();
+                    SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
+                    String dob = dateFormat.format(date);
+                    if (ValidationUtil.validateDate(dob)) {
+                        valuesToBeUpdate.put(Constants.DOB, dob);
+                    } else {
+                        errList.add(INVALID_DOB_FORMAT_ERROR);
+                    }
+                } else {
+                    errList.add("Cell is numeric but not a date.");
+                }
+            } else {
+                errList.add("Invalid value for Date of Birth type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateMotherTongueColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(8) != null && nextRow.getCell(8).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(8).getCellType() == CellType.STRING) {
+                String language = nextRow.getCell(8).getStringCellValue().trim();
+                valuesToBeUpdate.put(Constants.DOMICILE_MEDIUM, language);
+                if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(language) || this.validateFieldValue("languages", language)) {
+                    errList.add("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)");
+                }
+            } else {
+                errList.add("Invalid value for Mother Tongue type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateEmployeeIdColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(9) != null && nextRow.getCell(9).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(9).getCellType() == CellType.NUMERIC) {
+                valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, NumberToTextConverter.toText(nextRow.getCell(9).getNumericCellValue()).trim());
+            } else if (nextRow.getCell(9).getCellType() == CellType.STRING) {
+                valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, nextRow.getCell(9).getStringCellValue().trim());
+            } else {
+                errList.add("Invalid value for Employee ID type. Expecting string/number format");
+            }
+            if (StringUtils.hasLength((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))
+                    && !ValidationUtil.validateEmployeeId((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))) {
+                errList.add("Invalid Employee ID : Employee ID can contain alphabetic, alphanumeric numeric character(s) and have a max length of 30");
+            }
+        }
+    }
+
+    private void validatePinCodeColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(10) != null && nextRow.getCell(10).getCellType() != CellType.BLANK) {
+            String pinCode = "";
+            if (nextRow.getCell(10).getCellType() == CellType.NUMERIC) {
+                pinCode = NumberToTextConverter.toText(nextRow.getCell(10).getNumericCellValue());
+                valuesToBeUpdate.put(Constants.PIN_CODE, pinCode);
+            } else if (nextRow.getCell(10).getCellType() == CellType.STRING) {
+                pinCode = nextRow.getCell(10).getStringCellValue().trim();
+                valuesToBeUpdate.put(Constants.PIN_CODE, pinCode);
+            } else {
+                errList.add("Invalid value for Office Pin Code type. Expecting number/string format");
+            }
+            if (org.apache.commons.lang.StringUtils.isNotBlank(pinCode) && !ValidationUtil.validatePinCode(pinCode)) {
+                errList.add("Invalid Office Pin Code : Office Pin Code should be numeric and is of 6 digit.");
+            }
+        }
+    }
+
+    private void validateExternalSystemIdColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(11) != null && nextRow.getCell(11).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(11).getCellType() == CellType.NUMERIC) {
+                valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, NumberToTextConverter.toText(nextRow.getCell(11).getNumericCellValue()).trim());
+                if (!ValidationUtil.validateExternalSystemId((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM_ID))) {
+                    errList.add("Invalid External System ID : External System Id can contain alphanumeric characters and have a max length of 30");
+                }
+            } else if (nextRow.getCell(11).getCellType() == CellType.STRING) {
+                valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, nextRow.getCell(11).getStringCellValue().trim());
+                if (!ValidationUtil.validateExternalSystemId((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM_ID))) {
+                    errList.add("Invalid External System ID : External System Id can contain alphanumeric characters and have a max length of 30");
+                }
+            } else {
+                errList.add("Invalid value for External System ID type. Expecting string/number format");
+            }
+        }
+    }
+
+    private void validateExternalSystemColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(12) != null && !org.apache.commons.lang.StringUtils.isBlank(nextRow.getCell(12).toString())) {
+            if (nextRow.getCell(12).getCellType() == CellType.STRING) {
+                valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM, nextRow.getCell(12).getStringCellValue().trim());
+                if (!ValidationUtil.validateExternalSystem((String)valuesToBeUpdate.get(Constants.EXTERNAL_SYSTEM))) {
+                    errList.add("Invalid External System Name : External System Name can contain only alphabets and can have a max length of 255");
+                }
+            } else {
+                errList.add("Invalid value for External System Name type. Expecting string format");
+            }
+        }
+    }
+
+    private void validateTagColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (nextRow.getCell(13) != null && nextRow.getCell(13).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(13).getCellType() == CellType.STRING) {
+                String tagStr = nextRow.getCell(13).getStringCellValue().trim();
+                List<String> tagList = new ArrayList<String>();
+                if (!org.apache.commons.lang.StringUtils.isEmpty(tagStr)) {
+                    String[] tagStrList = tagStr.split(",", -1);
+                    for(String tag : tagStrList) {
+                        tagList.add(tag.trim());
+                    }
+                }
+                valuesToBeUpdate.put(Constants.TAG, tagList);
+                if (!ValidationUtil.validateTag((List<String>)valuesToBeUpdate.get(Constants.TAG))) {
+                    errList.add("Invalid Tag : Tags are comma separated string values. A Tag can contain only alphabets with spaces. eg: Bihar Circle, Patna Division");
+                }
+            } else {
+                errList.add("Invalid value for Tags type. Expecting string format");
+            }
+        }
+    }
+
+    private void setErrorDetails(StringBuilder str, List<String> errList, Cell statusCell, Cell errorDetails) {
         str.append("Failed to update user record. Error Cause by - ").append(errList);
         statusCell.setCellValue(Constants.FAILED_UPPERCASE);
         errorDetails.setCellValue(str.toString());
@@ -646,7 +677,7 @@ public class UserBulkUploadService {
             }
         } catch (Exception e) {
             logger.error("Exception while fetching user details : ",e);
-            throw new ApplicationException("Hub Service ERROR: ", e);
+            throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
         }
         return false;
     }
@@ -721,48 +752,43 @@ public class UserBulkUploadService {
     }
     public void processBulkUploadV1(HashMap<String, String> inputDataMap) throws IOException {
         File file = null;
-        BufferedReader reader = null;
-        CSVPrinter csvPrinter = null;
-        BufferedWriter bufferedWriter = null;
-        FileWriter fileWriter = null;
         int totalRecordsCount = 0;
         int noOfSuccessfulRecords = 0;
         int failedRecordsCount = 0;
-        CSVParser csvParser = null;
         String status = "";
 
         try {
             file = new File(Constants.LOCAL_BASE_PATH + inputDataMap.get(Constants.FILE_NAME));
             if (file.exists() && file.length() > 0) {
-                reader = new BufferedReader(new FileReader(file));
-                char csvDelimiter = configuration.getCsvDelimiter();
-                String tagsDelimiter =  configuration.getTagsDelimiter();
-                CSVFormat csvFormat = CSVFormat.RFC4180.builder()
-                        .setDelimiter(csvDelimiter)
-                        .setHeader()
-                        .setSkipHeaderRecord(true)
-                        .setQuote('"')
-                        .setIgnoreSurroundingSpaces(true)
-                        .setTrim(true)
-                        .build();
-                csvParser = new CSVParser(reader, csvFormat);
+            char csvDelimiter = configuration.getCsvDelimiter();
+            String tagsDelimiter =  configuration.getTagsDelimiter();
+            CSVFormat csvFormat = CSVFormat.RFC4180.builder()
+                    .setDelimiter(csvDelimiter)
+                    .setHeader()
+                    .setSkipHeaderRecord(true)
+                    .setQuote('"')
+                    .setIgnoreSurroundingSpaces(true)
+                    .setTrim(true)
+                    .build();
+            try (BufferedReader reader = new BufferedReader(new FileReader(file));
+                 CSVParser csvParser = new CSVParser(reader, csvFormat)) {
                 List<CSVRecord> csvRecords = csvParser.getRecords();
                 List<Map<String, Object>> updatedRecords = new ArrayList<>();
                 List<String> headers = new ArrayList<>(csvParser.getHeaderNames());
-                headers.replaceAll(header -> header.replaceAll("^\"|\"$", ""));
+                headers.replaceAll(header -> header.replaceAll("(?:^\"|\"$)", ""));
 
-                if (!headers.contains("Status")) {
-                    headers.add("Status");
+                if (!headers.contains(Constants.STATUS_BULK_UPLOAD)) {
+                    headers.add(Constants.STATUS_BULK_UPLOAD);
                 }
-                if (!headers.contains("Error Details")) {
-                    headers.add("Error Details");
+                if (!headers.contains(Constants.ERROR_DETAILS)) {
+                    headers.add(Constants.ERROR_DETAILS);
                 }
 
                 for (CSVRecord record : csvRecords) {
                     if (record.size() > headers.size() - 2) {
                         Map<String, Object> errorRecord = new LinkedHashMap<>(record.toMap());
-                        errorRecord.put("Status", "FAILED");
-                        errorRecord.put("Error Details", "Number of fields in the record exceeds expected number. Please check your data.");
+                        errorRecord.put(Constants.STATUS_BULK_UPLOAD, "FAILED");
+                        errorRecord.put(Constants.ERROR_DETAILS, "Number of fields in the record exceeds expected number. Please check your data.");
                         updatedRecords.add(errorRecord);
                         totalRecordsCount++;
                         failedRecordsCount++;
@@ -771,7 +797,7 @@ public class UserBulkUploadService {
                     long duration = 0;
                     long startTime = System.currentTimeMillis();
                     logger.info("UserBulkUploadService:: Record {}", record.getRecordNumber());
-                    StringBuffer str = new StringBuffer();
+                    StringBuilder str = new StringBuilder();
                     List<String> errList = new ArrayList<>();
                     Map<String, Object> csvValues = new HashMap<>(record.toMap());
                     Map<String, Object> valuesToBeUpdate = new HashMap<>();
@@ -822,7 +848,7 @@ public class UserBulkUploadService {
                             errList.add("Invalid Phone number format");
                         }
                     }
-                    if (!StringUtils.isEmpty(phone) && isEmailValid) {
+                    if (StringUtils.hasLength(phone) && isEmailValid) {
                         userDetailsForMobileAndEmail = new HashMap<>();
                         filters = new HashMap<>();
                         filters.put(Constants.EMAIL, email);
@@ -830,8 +856,8 @@ public class UserBulkUploadService {
                         isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, userDetailsForMobileAndEmail);
                     }
                     if (!CollectionUtils.isEmpty(errList)) {
-                        csvValues.put("Status", Constants.FAILED_UPPERCASE);
-                        csvValues.put("Error Details", String.join(tagsDelimiter, errList));
+                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
+                        csvValues.put(Constants.ERROR_DETAILS, String.join(tagsDelimiter, errList));
                         failedRecordsCount++;
                         totalRecordsCount++;
                         updatedRecords.add(csvValues);
@@ -846,9 +872,9 @@ public class UserBulkUploadService {
                         String userRootOrgId = (String) userDetails.get(Constants.ROOT_ORG_ID);
                         String mdoAdminRootOrgId = inputDataMap.get(Constants.ROOT_ORG_ID);
                         if (!mdoAdminRootOrgId.equalsIgnoreCase(userRootOrgId)) {
-                            logger.info("The User belongs to a different MDO Organisation");
-                            errList.add("The User belongs to a different MDO Organisation");
-                            csvValues.put("Error Details", String.join(tagsDelimiter, errList));
+                            logger.info(DIFFERENT_MDO_ORG_ERROR);
+                            errList.add(DIFFERENT_MDO_ORG_ERROR);
+                            csvValues.put(Constants.ERROR_DETAILS, String.join(tagsDelimiter, errList));
                             failedRecordsCount++;
                             totalRecordsCount++;
                             updatedRecords.add(csvValues);
@@ -857,8 +883,8 @@ public class UserBulkUploadService {
                     }
 
                     if (!CollectionUtils.isEmpty(errList)) {
-                        csvValues.put("Status", Constants.FAILED_UPPERCASE);
-                        csvValues.put("Error Details", String.join(tagsDelimiter, errList));
+                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
+                        csvValues.put(Constants.ERROR_DETAILS, String.join(tagsDelimiter, errList));
                         failedRecordsCount++;
                         totalRecordsCount++;
                         updatedRecords.add(csvValues);
@@ -866,136 +892,27 @@ public class UserBulkUploadService {
                     }
 
                     // Validate and update fields
-                    if (!record.get(0).isEmpty()) {
-                        String fullName = record.get(0).trim();
-                        if (ValidationUtil.validateFullName(fullName)) {
-                            valuesToBeUpdate.put(Constants.FIRSTNAME, fullName);
-                        } else {
-                            errList.add("Invalid Full Name format");
-                        }
-                    }
-                    // Group
-                    if (!record.get(3).isEmpty()) {
-                        String group = record.get(3).trim();
-                        valuesToBeUpdate.put(Constants.GROUP, group);
-                        if (!this.validateGroupValue(group)) {
-                            errList.add("Invalid value of Group Type, please choose a valid value from the default list");
-                        }
-                    }
+                    validateFullNameColumnV1(record, valuesToBeUpdate, errList);
+                    validateGroupColumnV1(record, valuesToBeUpdate, errList);
 
                     if (!isEmailOrPhoneNumberExist) {
                         valuesToBeUpdate.put(Constants.MOBILE, phone);
                     }
-                    // Designation
-                    if (!record.get(4).isEmpty()) {
-                        String designation = record.get(4).trim();
-                        valuesToBeUpdate.put(Constants.DESIGNATION, designation);
-                        if (!ValidationUtil.validateCsvDesignationPattern(designation, configuration.getCsvDesignationRegex())) {
-                            errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
-                        }
-                        if (this.validateDesignationFieldValue(designation)) {
-                            errList.add("Invalid Value of Designation, please choose a valid value from the default list");
-                        }
-                    }
-
-                    // Gender
-                    if (!record.get(5).isEmpty()) {
-                        String gender = record.get(5).trim();
-                        if (validateGender(gender)) {
-                            valuesToBeUpdate.put(Constants.GENDER, gender);
-                        } else {
-                            errList.add("Invalid Gender : Gender can be only among one of these " + String.join("|", configuration.getBulkUploadGenderValue()));
-                        }
-                    }
-
-                    // Category
-                    if (!record.get(6).isEmpty()) {
-                        String category = record.get(6).trim();
-                        if (validateCategory(category)) {
-                            valuesToBeUpdate.put(Constants.CATEGORY, category);
-                        } else {
-                            errList.add("Invalid Category : Category can be only among one of these " + String.join("|", configuration.getBulkUploadCategoryValue()));
-                        }
-                    }
-
-                    // Date of Birth
-                    if (!record.get(7).isEmpty()) {
-                        String dob = record.get(7).trim();
-                        if (ValidationUtil.validateDate(dob)) {
-                            valuesToBeUpdate.put(Constants.DOB, dob);
-                        } else {
-                            errList.add("Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy");
-                        }
-                    }
-
-                    // Mother Tongue
-                    if (!record.get(8).isEmpty()) {
-                        String motherTongue = record.get(8).trim();
-                        if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(motherTongue) || this.validateFieldValue("languages", motherTongue)) {
-                            errList.add("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)");
-                        }
-                        valuesToBeUpdate.put(Constants.DOMICILE_MEDIUM, motherTongue);
-                    }
-
-                    // Employee ID
-                    if (!record.get(9).isEmpty()) {
-                        String employeeId = record.get(9).trim();
-                        valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, employeeId);
-                        if (!ValidationUtil.validateEmployeeId((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))) {
-                            errList.add("Invalid Employee ID : Employee ID can contain alphanumeric characters or numeric character and have a max length of 30");
-                        }
-                    }
-
-
-                    // Office Pin Code
-                    if (!record.get(10).isEmpty()) {
-                        String officePinCode = record.get(10).trim();
-                        if (!ValidationUtil.validatePinCode(officePinCode)) {
-                            errList.add("Invalid Pin Code: " + officePinCode +
-                                    " Pin Code should be numeric and is of 6 digits.");
-                        }
-                        valuesToBeUpdate.put(Constants.PIN_CODE, officePinCode);
-                    }
-
-                    // External System ID
-                    if (!record.get(11).isEmpty()) {
-                        String externalSystemId = record.get(11).trim();
-                        if (!ValidationUtil.validateExternalSystemId(externalSystemId)) {
-                            errList.add("Invalid External System ID: " + externalSystemId +
-                                    " External System Id can contain alphanumeric characters and have a max length of 30");
-                        }
-                        valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, externalSystemId);
-                    }
-
-                    // External System
-                    if (!record.get(12).isEmpty()) {
-                        String externalSystem = record.get(12).trim();
-                        if (!ValidationUtil.validateExternalSystem(externalSystem)) {
-                            errList.add("Invalid External System Name: " + externalSystem +
-                                    " External System Name can contain only alphabets and can have a max length of 255");
-                        }
-                        valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM, externalSystem);
-                    }
-
-                        // Tags
-                        if (!record.get(13).isEmpty()) {
-                            String[] tagStrList = record.get(13).trim().split(Pattern.quote(tagsDelimiter), -1);
-                            List<String> tagList = new ArrayList<>();
-                            for (String tag : tagStrList) {
-                                tagList.add(tag.trim());
-                            }
-                            if (!ValidationUtil.validateTag(tagList)) {
-                                errList.add("Invalid Tag: " + tagStrList +
-                                        " Tags are separated by ';' and can contain only alphabets with spaces. e.g., Bihar Circle;Patna Division");
-                            }
-                            valuesToBeUpdate.put(Constants.TAG, tagList);
-                        }
-
+                    validateDesignationColumnV1(record, valuesToBeUpdate, errList);
+                    validateGenderColumnV1(record, valuesToBeUpdate, errList);
+                    validateCategoryColumnV1(record, valuesToBeUpdate, errList);
+                    validateDobColumnV1(record, valuesToBeUpdate, errList);
+                    validateMotherTongueColumnV1(record, valuesToBeUpdate, errList);
+                    validateEmployeeIdColumnV1(record, valuesToBeUpdate, errList);
+                    validatePinCodeColumnV1(record, valuesToBeUpdate, errList);
+                    validateExternalSystemIdColumnV1(record, valuesToBeUpdate, errList);
+                    validateExternalSystemColumnV1(record, valuesToBeUpdate, errList);
+                    validateTagColumnV1(record, valuesToBeUpdate, errList, tagsDelimiter);
 
                     if (!CollectionUtils.isEmpty(errList)) {
                         String statusValue = errList.isEmpty() ? Constants.SUCCESSFUL_UPERCASE : Constants.FAILED_UPPERCASE;
-                        csvValues.put("Status", statusValue);
-                        csvValues.put("Error Details", errList.isEmpty() ? "" : String.join(tagsDelimiter, errList));
+                        csvValues.put(Constants.STATUS_BULK_UPLOAD, statusValue);
+                        csvValues.put(Constants.ERROR_DETAILS, errList.isEmpty() ? "" : String.join(tagsDelimiter, errList));
                         failedRecordsCount++;
                         totalRecordsCount++;
                         updatedRecords.add(csvValues);
@@ -1007,7 +924,7 @@ public class UserBulkUploadService {
                     if (!CollectionUtils.isEmpty(userDetails)) {
                         userId = (String) userDetails.get(Constants.USER_ID);
                     }
-                    logger.info("userId " + userId);
+                    logger.info("userId {}", userId);
                     List<WfStatusEntity> userPendingRequest = wfStatusRepo.findByUserIdAndCurrentStatus(userId, true);
                     boolean userRecordUpdate = true;
                     if (!CollectionUtils.isEmpty(userPendingRequest)) {
@@ -1030,10 +947,10 @@ public class UserBulkUploadService {
                                         WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
                                         if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
                                             userRecordUpdate = false;
-                                            csvValues.put("Status", Constants.FAILED_UPPERCASE);
-                                            csvValues.put("Error Details", Constants.UPDATE_FAILED);
+                                            csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
+                                            csvValues.put(Constants.ERROR_DETAILS, Constants.UPDATE_FAILED);
                                         } else {
-                                            csvValues.put("Status", Constants.SUCCESSFUL_UPERCASE);
+                                            csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.SUCCESSFUL_UPERCASE);
                                         }
                                         valuesToBeUpdate.remove(entry.getKey());
                                     }
@@ -1057,12 +974,12 @@ public class UserBulkUploadService {
 
                     if (userRecordUpdate) {
                         noOfSuccessfulRecords++;
-                        csvValues.put("Status", Constants.SUCCESSFUL_UPERCASE);
-                        csvValues.put("Error Details", "NA");
+                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.SUCCESSFUL_UPERCASE);
+                        csvValues.put(Constants.ERROR_DETAILS, "NA");
                     } else {
                         failedRecordsCount++;
-                        csvValues.put("Status", Constants.FAILED_UPPERCASE);
-                        csvValues.put("Error Details", Constants.UPDATE_FAILED);
+                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
+                        csvValues.put(Constants.ERROR_DETAILS, Constants.UPDATE_FAILED);
                     }
                     totalRecordsCount++;
                     duration = System.currentTimeMillis() - startTime;
@@ -1070,8 +987,6 @@ public class UserBulkUploadService {
                     updatedRecords.add(csvValues);
                 }
                     // Write back updated records to the same CSV file
-                    fileWriter = new FileWriter(file);
-                    bufferedWriter = new BufferedWriter(fileWriter);
                     CSVFormat outputFormat = CSVFormat.RFC4180.builder()
                             .setDelimiter(csvDelimiter)
                             .setHeader(headers.toArray(new String[0]))
@@ -1079,25 +994,26 @@ public class UserBulkUploadService {
                             .setQuote('"')
                             .setQuoteMode(org.apache.commons.csv.QuoteMode.MINIMAL)
                             .build();
-                    csvPrinter = new CSVPrinter(bufferedWriter, outputFormat);
-
-
-                for (Map<String, Object> record : updatedRecords) {
-                    List<String> recordValues = new ArrayList<>();
-                    for (String header : headers) {
-                        recordValues.add((String) record.get(header));
+                try (FileWriter fileWriter = new FileWriter(file);
+                     BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
+                     CSVPrinter csvPrinter = new CSVPrinter(bufferedWriter, outputFormat)) {
+                    for (Map<String, Object> record : updatedRecords) {
+                        List<String> recordValues = new ArrayList<>();
+                        for (String header : headers) {
+                            recordValues.add((String) record.get(header));
+                        }
+                        csvPrinter.printRecord(recordValues);
                     }
-                    csvPrinter.printRecord(recordValues);
-                }
 
-                if (totalRecordsCount == 0) {
-                    List<String> singleRow = new ArrayList<>(Collections.nCopies(headers.size(), ""));
-                    singleRow.set(headers.indexOf("Status"), Constants.FAILED_UPPERCASE);
-                    singleRow.set(headers.indexOf("Error Details"), Constants.EMPTY_FILE_FAILED);
-                    csvPrinter.printRecord(singleRow);
-                    status = Constants.FAILED_UPPERCASE;
+                    if (totalRecordsCount == 0) {
+                        List<String> singleRow = new ArrayList<>(Collections.nCopies(headers.size(), ""));
+                        singleRow.set(headers.indexOf(Constants.STATUS_BULK_UPLOAD), Constants.FAILED_UPPERCASE);
+                        singleRow.set(headers.indexOf(Constants.ERROR_DETAILS), Constants.EMPTY_FILE_FAILED);
+                        csvPrinter.printRecord(singleRow);
+                        status = Constants.FAILED_UPPERCASE;
+                    }
+                    csvPrinter.flush();
                 }
-                csvPrinter.flush();
 
                 status = uploadTheUpdatedCSVFile(file);
 
@@ -1109,27 +1025,160 @@ public class UserBulkUploadService {
                 updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
                         status, totalRecordsCount, noOfSuccessfulRecords, failedRecordsCount);
 
+            }
             } else {
                 logger.error("File does not exist or is empty.");
                 status = Constants.FAILED_UPPERCASE;
             }
         } catch (Exception e) {
-            logger.error(String.format("Error in Process Bulk Upload %s", e.getMessage()), e);
+            logger.error("Error in Process Bulk Upload {}", e.getMessage(), e);
             this.updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
                     Constants.FAILED_UPPERCASE, 0, 0, 0);
         } finally {
-            if (csvParser != null)
-                csvParser.close();
-            if (csvPrinter != null)
-                csvPrinter.close();
-            if (bufferedWriter != null)
-                bufferedWriter.close();
-            if (fileWriter != null)
-                fileWriter.close();
-            if (file != null)
-                file.delete();
+            if (file != null) {
+                try {
+                    Files.delete(file.toPath());
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
+                }
+            }
         }
+    }
+
+    private void validateFullNameColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(0).isEmpty()) {
+            String fullName = record.get(0).trim();
+            if (ValidationUtil.validateFullName(fullName)) {
+                valuesToBeUpdate.put(Constants.FIRSTNAME, fullName);
+            } else {
+                errList.add("Invalid Full Name format");
+            }
         }
+    }
+
+    private void validateGroupColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(3).isEmpty()) {
+            String group = record.get(3).trim();
+            valuesToBeUpdate.put(Constants.GROUP, group);
+            if (!this.validateGroupValue(group)) {
+                errList.add("Invalid value of Group Type, please choose a valid value from the default list");
+            }
+        }
+    }
+
+    private void validateDesignationColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(4).isEmpty()) {
+            String designation = record.get(4).trim();
+            valuesToBeUpdate.put(Constants.DESIGNATION, designation);
+            if (!ValidationUtil.validateCsvDesignationPattern(designation, configuration.getCsvDesignationRegex())) {
+                errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
+            }
+            if (this.validateDesignationFieldValue(designation)) {
+                errList.add("Invalid Value of Designation, please choose a valid value from the default list");
+            }
+        }
+    }
+
+    private void validateGenderColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(5).isEmpty()) {
+            String gender = record.get(5).trim();
+            if (validateGender(gender)) {
+                valuesToBeUpdate.put(Constants.GENDER, gender);
+            } else {
+                errList.add("Invalid Gender : Gender can be only among one of these " + String.join("|", configuration.getBulkUploadGenderValue()));
+            }
+        }
+    }
+
+    private void validateCategoryColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(6).isEmpty()) {
+            String category = record.get(6).trim();
+            if (validateCategory(category)) {
+                valuesToBeUpdate.put(Constants.CATEGORY, category);
+            } else {
+                errList.add("Invalid Category : Category can be only among one of these " + String.join("|", configuration.getBulkUploadCategoryValue()));
+            }
+        }
+    }
+
+    private void validateDobColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(7).isEmpty()) {
+            String dob = record.get(7).trim();
+            if (ValidationUtil.validateDate(dob)) {
+                valuesToBeUpdate.put(Constants.DOB, dob);
+            } else {
+                errList.add(INVALID_DOB_FORMAT_ERROR);
+            }
+        }
+    }
+
+    private void validateMotherTongueColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(8).isEmpty()) {
+            String motherTongue = record.get(8).trim();
+            if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(motherTongue) || this.validateFieldValue("languages", motherTongue)) {
+                errList.add("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)");
+            }
+            valuesToBeUpdate.put(Constants.DOMICILE_MEDIUM, motherTongue);
+        }
+    }
+
+    private void validateEmployeeIdColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(9).isEmpty()) {
+            String employeeId = record.get(9).trim();
+            valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, employeeId);
+            if (!ValidationUtil.validateEmployeeId((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))) {
+                errList.add("Invalid Employee ID : Employee ID can contain alphanumeric characters or numeric character and have a max length of 30");
+            }
+        }
+    }
+
+    private void validatePinCodeColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(10).isEmpty()) {
+            String officePinCode = record.get(10).trim();
+            if (!ValidationUtil.validatePinCode(officePinCode)) {
+                errList.add("Invalid Pin Code: " + officePinCode +
+                        " Pin Code should be numeric and is of 6 digits.");
+            }
+            valuesToBeUpdate.put(Constants.PIN_CODE, officePinCode);
+        }
+    }
+
+    private void validateExternalSystemIdColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(11).isEmpty()) {
+            String externalSystemId = record.get(11).trim();
+            if (!ValidationUtil.validateExternalSystemId(externalSystemId)) {
+                errList.add("Invalid External System ID: " + externalSystemId +
+                        " External System Id can contain alphanumeric characters and have a max length of 30");
+            }
+            valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM_ID, externalSystemId);
+        }
+    }
+
+    private void validateExternalSystemColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!record.get(12).isEmpty()) {
+            String externalSystem = record.get(12).trim();
+            if (!ValidationUtil.validateExternalSystem(externalSystem)) {
+                errList.add("Invalid External System Name: " + externalSystem +
+                        " External System Name can contain only alphabets and can have a max length of 255");
+            }
+            valuesToBeUpdate.put(Constants.EXTERNAL_SYSTEM, externalSystem);
+        }
+    }
+
+    private void validateTagColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList, String tagsDelimiter) {
+        if (!record.get(13).isEmpty()) {
+            String[] tagStrList = record.get(13).trim().split(Pattern.quote(tagsDelimiter), -1);
+            List<String> tagList = new ArrayList<>();
+            for (String tag : tagStrList) {
+                tagList.add(tag.trim());
+            }
+            if (!ValidationUtil.validateTag(tagList)) {
+                errList.add("Invalid Tag: " + tagStrList +
+                        " Tags are separated by ';' and can contain only alphabets with spaces. e.g., Bihar Circle;Patna Division");
+            }
+            valuesToBeUpdate.put(Constants.TAG, tagList);
+        }
+    }
 
     private HashMap<String, String> getHeaders() {
         HashMap<String, String> headersValue = new HashMap<>();
@@ -1196,25 +1245,13 @@ public class UserBulkUploadService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> getOrCreateMap(Map<String, Object> parent, String key) {
-        Object value = parent.get(key);
-        if (value == null) {
-            Map<String, Object> newValue = new HashMap<>();
-            parent.put(key, newValue);
-            return newValue;
-        }
+        Object value = parent.computeIfAbsent(key, k -> new HashMap<>());
         return value instanceof Map<?, ?> ? (Map<String, Object>) value : null;
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> getOrCreateFirstProfessionalDetail(Map<String, Object> profileDetails) {
-        Object value = profileDetails.get(Constants.PROFESSIONAL_DETAILS);
-        if (value == null) {
-            List<Map<String, Object>> details = new ArrayList<>();
-            Map<String, Object> detail = new HashMap<>();
-            details.add(detail);
-            profileDetails.put(Constants.PROFESSIONAL_DETAILS, details);
-            return detail;
-        }
+        Object value = profileDetails.computeIfAbsent(Constants.PROFESSIONAL_DETAILS, k -> new ArrayList<Map<String, Object>>());
         if (!(value instanceof List<?>)) {
             return null;
         }
@@ -1253,8 +1290,7 @@ public class UserBulkUploadService {
 
         SBApiResponse uploadResponse = storageService.uploadFile(file, configuration.getUserBulkUpdateFolderName(), configuration.getWorkflowCloudContainerName());
         if (!HttpStatus.OK.equals(uploadResponse.getResponseCode())) {
-            logger.info(String.format("Failed to upload file. Error: %s",
-                    uploadResponse.getParams().getErrmsg()));
+            logger.info("Failed to upload file. Error: {}", uploadResponse.getParams().getErrmsg());
             return Constants.FAILED_UPPERCASE;
         }
         return Constants.SUCCESS_UPPERCASE;

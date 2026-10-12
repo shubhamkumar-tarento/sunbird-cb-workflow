@@ -1,8 +1,8 @@
 package org.sunbird.workflow.service.impl;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.WfRequest;
@@ -12,14 +12,12 @@ import org.sunbird.workflow.service.WorkflowESSyncService;
 import org.sunbird.workflow.utils.ElasticsearchServiceManager;
 
 @Service
+@RequiredArgsConstructor
 public class WorkflowESSyncServiceImpl implements WorkflowESSyncService {
     Logger logger = LogManager.getLogger(WorkflowESSyncServiceImpl.class);
 
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    private ElasticsearchServiceManager esServiceManager;
+    private final WfStatusRepo wfStatusRepo;
+    private final ElasticsearchServiceManager esServiceManager;
 
     @Override
     public void syncWithElasticService(WfRequest wfRequest) {
@@ -38,9 +36,7 @@ public class WorkflowESSyncServiceImpl implements WorkflowESSyncService {
                                 wfRequest.getDeptName(), Constants.WF_PROFILE_DESIGNATION_REQUEST_STRING, true);
                     }
                     break;
-                case Constants.WITHDRAWN:
-                case Constants.APPROVED:
-                case Constants.REJECTED:
+                case Constants.WITHDRAWN, Constants.APPROVED, Constants.REJECTED:
                     if (Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(wfStatusEntity.getRequestType())) {
                         esServiceManager.updateWfRequestObject(wfRequest.getWfId(), wfRequest.getUserId(),
                                 wfRequest.getDeptName(), Constants.WF_TRANSFER_REQUEST_STRING, false);

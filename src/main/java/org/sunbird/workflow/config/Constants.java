@@ -183,7 +183,7 @@ public class Constants {
 	public static final String ENROLMENT_END_DATE = "enrollment_enddate";
 	public static final String CORE_CONNECTIONS_PER_HOST_FOR_LOCAL = "coreConnectionsPerHostForLocal";
 	public static final String CORE_CONNECTIONS_PER_HOST_FOR_REMOTE = "coreConnectionsPerHostForRemote";
-	public static final String MAX_CONNECTIONS_PER_HOST_FOR_LOCAl = "maxConnectionsPerHostForLocal";
+	public static final String MAX_CONNECTIONS_PER_HOST_FOR_LOCAL = "maxConnectionsPerHostForLocal";
 	public static final String MAX_CONNECTIONS_PER_HOST_FOR_REMOTE = "maxConnectionsPerHostForRemote";
 	public static final String MAX_REQUEST_PER_CONNECTION = "maxRequestsPerConnection";
 	public static final String HEARTBEAT_INTERVAL = "heartbeatIntervalSeconds";
@@ -295,7 +295,7 @@ public class Constants {
 	public static final String X_AUTH_TOKEN = "x-authenticated-user-token";
 	public static final String DOT_SEPARATOR = ".";
 	public static final String SHA_256_WITH_RSA = "SHA256withRSA";
-	public static final String _UNAUTHORIZED = "Unauthorized";
+	public static final String UNAUTHORIZED_USER_ID = "Unauthorized";
 	public static final String SUB = "sub";
 	public static final String SSO_URL = "sso.url";
 	public static final String SSO_REALM = "sso.realm";
@@ -397,7 +397,7 @@ public class Constants {
 	public static final String NOTIFICATIONS = "notifications";
 	public static final String MODERATOR_TRANSFER_SUBJECT_TEMPLATE = "Urgent: Moderator Transfer Request for \"%s\"";
 	public static final String ORG_TRANSFER_STATE = "orgTransferState";
-	public static final String inWorkflow = "inWorkflow";
+	public static final String IN_WORKFLOW_KEY = "inWorkflow";
 	public static final String GROUP_DESGINATION_ENTITIES = "groupDesignationEntities";
 	public static final String API_WORKFLOW_LOAD_CSV_BULK_APPROVAL = "api.workflow.load.csv.bulk.approval";
 	public static final String ACTION_APPROVE_REJECT = "action(approve/reject)";

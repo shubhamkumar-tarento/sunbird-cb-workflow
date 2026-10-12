@@ -13,13 +13,13 @@ import java.util.Properties;
 public class CassandraPropertyReader {
 
 	private final Properties properties = new Properties();
-	  private static final String file = "cassandratablecolumn.properties";
+	  private static final String PROPERTIES_FILE_NAME = "cassandratablecolumn.properties";
 	  private static CassandraPropertyReader cassandraPropertyReader = null;
 
 	  /** private default constructor 
 	 * @throws IOException */
 	  private CassandraPropertyReader() throws IOException {
-	    InputStream in = this.getClass().getClassLoader().getResourceAsStream(file);
+	    InputStream in = this.getClass().getClassLoader().getResourceAsStream(PROPERTIES_FILE_NAME);
 	    try {
 	      properties.load(in);
 	    } catch (IOException e) {
@@ -27,17 +27,13 @@ public class CassandraPropertyReader {
 	    }
 	  }
 
-	  public static CassandraPropertyReader getInstance() {
+	  public static synchronized CassandraPropertyReader getInstance() {
 	    if (null == cassandraPropertyReader) {
-	      synchronized (CassandraPropertyReader.class) {
-	        if (null == cassandraPropertyReader) {
-	          try {
-				cassandraPropertyReader = new CassandraPropertyReader();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-	        }
+	      try {
+	    	  cassandraPropertyReader = new CassandraPropertyReader();
+	      } catch (IOException e) {
+	    	  // TODO Auto-generated catch block
+	    	  e.printStackTrace();
 	      }
 	    }
 	    return cassandraPropertyReader;

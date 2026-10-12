@@ -1,6 +1,6 @@
 package org.sunbird.workflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -12,10 +12,10 @@ import org.sunbird.workflow.service.PositionWorkFlowService;
 
 @RestController
 @RequestMapping("/v1/position/workflow")
+@RequiredArgsConstructor
 public class PositionWorkFlowController {
 
-    @Autowired
-    private PositionWorkFlowService signUpWorkFlowService;
+    private final PositionWorkFlowService signUpWorkFlowService;
 
     @PostMapping("/create")
     public ResponseEntity<Response> positionWfCreate(@RequestHeader String rootOrg, @RequestHeader String org,

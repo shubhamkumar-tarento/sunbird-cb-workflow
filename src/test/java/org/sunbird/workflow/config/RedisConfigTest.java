@@ -16,8 +16,7 @@ class RedisConfigTest {
     @BeforeEach
     void setUp() {
         redisConfiguration = mock(RedisConfiguration.class);
-        redisConfig = new RedisConfig();
-        redisConfig.redisConfiguration = redisConfiguration;
+        redisConfig = new RedisConfig(redisConfiguration);
 
         when(redisConfiguration.getGetRedisHostName()).thenReturn("localhost");
         when(redisConfiguration.getRedisPort()).thenReturn("6379");

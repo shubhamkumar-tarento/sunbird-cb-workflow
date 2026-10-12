@@ -1,6 +1,6 @@
 package org.sunbird.workflow.service.impl;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
@@ -12,18 +12,14 @@ import org.sunbird.workflow.producer.Producer;
 import org.sunbird.workflow.service.UserRegistrationWfService;
 
 @Service
+@RequiredArgsConstructor
 public class UserRegistrationWfServiceImpl implements UserRegistrationWfService {
 
 	private WFLogger logger = new WFLogger(getClass().getName());
 
-	@Autowired
-	private WfStatusRepo wfStatusRepo;
-
-	@Autowired
-	private Configuration configuration;
-
-	@Autowired
-	private Producer producer;
+	private final WfStatusRepo wfStatusRepo;
+	private final Configuration configuration;
+	private final Producer producer;
 
 	@Override
 	public void processMessage(WfRequest wfRequest) {

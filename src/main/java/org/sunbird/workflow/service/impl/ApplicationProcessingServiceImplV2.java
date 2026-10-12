@@ -1,8 +1,8 @@
 package org.sunbird.workflow.service.impl;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -21,53 +21,33 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@RequiredArgsConstructor
 public class ApplicationProcessingServiceImplV2 {
 
-    @Autowired
-    private UserProfileWfService userProfileWfService;
-
-    @Autowired
-    private Configuration configuration;
-    @Autowired
-    private RequestServiceImpl requestService;
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    private UserRegistrationWfService userRegService;
-
-    @Autowired
-    private BPWorkFlowService bpWorkFlowService;
-
-    @Autowired
-    private DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
+    private final UserProfileWfService userProfileWfService;
+    private final Configuration configuration;
+    private final RequestServiceImpl requestService;
+    private final WfStatusRepo wfStatusRepo;
+    private final UserRegistrationWfService userRegService;
+    private final BPWorkFlowService bpWorkFlowService;
+    private final DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
 
     Logger logger = LogManager.getLogger(ApplicationProcessingServiceImpl.class);
 
     public void processWfApplicationRequest(List<WfRequest> wfRequests, String serviceName, String userId, String userToken) {
         switch (serviceName) {
             // Or condition in case statement
-            case Constants.PROFILE_SERVICE_NAME:
-            case Constants.USER_PROFILE_FLAG_SERVICE:
+            case Constants.PROFILE_SERVICE_NAME, Constants.USER_PROFILE_FLAG_SERVICE:
                 userProfileWfService.updateUserProfileV2(wfRequests, userId, userToken);
                 break;
             case Constants.USER_REGISTRATION_SERVICE_NAME:
-                wfRequests.forEach(wfRequest -> {
-                    userRegService.processMessage(wfRequest);
-                });
+                wfRequests.forEach(wfRequest -> userRegService.processMessage(wfRequest));
                 break;
             case Constants.DOMAIN:
-                wfRequests.forEach(wfRequest -> {
-                    domainWhiteListWorkFlowService.processDomainRequest(wfRequest);
-                });
-            case Constants.BLENDED_PROGRAM_SERVICE_NAME:
-            case Constants.ONE_STEP_MDO_APPROVAL:
-            case Constants.ONE_STEP_PC_APPROVAL:
-            case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-            case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
-                wfRequests.forEach(wfRequest -> {
-                    bpWorkFlowService.processWFRequest(wfRequest);
-                });
+                wfRequests.forEach(wfRequest -> domainWhiteListWorkFlowService.processDomainRequest(wfRequest));
+                break;
+            case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+                wfRequests.forEach(wfRequest -> bpWorkFlowService.processWFRequest(wfRequest));
                 break;
             default:
                 break;
@@ -86,7 +66,7 @@ public class ApplicationProcessingServiceImplV2 {
                         HashMap<String, Object> fromValue = (HashMap<String, Object>) updatedValues.get("fromValue");
                         HashMap<String, Object> toValue = (HashMap<String, Object>) updatedValues.get("toValue");
                         String key = toValue.entrySet().iterator().next().getKey();
-                        if (!StringUtils.isEmpty(key) && key.equals("name")) {
+                        if (StringUtils.hasLength(key) && key.equals("name")) {
                             String newDeptName = (String) toValue.entrySet().iterator().next().getValue();
                             String oldDeptName = (String) fromValue.entrySet().iterator().next().getValue();
                             HashMap<String, Object> departMentInfo = new HashMap<>();

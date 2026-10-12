@@ -7,6 +7,7 @@ import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.sunbird.cloud.storage.BaseStorageService;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.models.SBApiResponse;
@@ -34,6 +35,10 @@ class StorageServiceImplTest {
     @BeforeEach
     void setUp() {
         multipartFile = new MockMultipartFile("file", "test.txt", "text/plain", "Hello World".getBytes());
+
+        // Constructor injection no longer field-injects storageService; wire the mock directly
+        // so init() short-circuits instead of building a real storage client.
+        ReflectionTestUtils.setField(service, "storageService", storageService);
 
         // manually trigger @PostConstruct
         service.init();

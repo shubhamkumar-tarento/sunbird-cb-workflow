@@ -1,6 +1,6 @@
 package org.sunbird.workflow.service.impl;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.postgres.entity.WfAuditEntity;
@@ -11,13 +11,11 @@ import org.sunbird.workflow.postgres.repo.WfStatusRepo;
 import java.util.Date;
 
 @Service
+@RequiredArgsConstructor
 public class WorkflowAuditProcessingServiceImpl {
 
-    @Autowired
-    private WfAuditRepo wfAuditRepo;
-
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
+    private final WfAuditRepo wfAuditRepo;
+    private final WfStatusRepo wfStatusRepo;
 
     public void createAudit(WfRequest wfRequest){
         WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(), wfRequest.getWfId());

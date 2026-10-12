@@ -8,8 +8,8 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Constants;
@@ -22,29 +22,21 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
+@RequiredArgsConstructor
 public class ApplicationProcessingConsumerV2 {
 
     Logger logger = LogManager.getLogger(ApplicationProcessingConsumer.class);
 
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    private ApplicationProcessingServiceImplV2 applicationProcessingServiceImplV2;
-
-    @Autowired
-    private WorkflowAuditProcessingServiceImpl workflowAuditProcessingService;
-    
-    @Autowired
-    private WorkflowESSyncServiceImpl workflowESSyncServiceImpl;
+    private final ObjectMapper mapper;
+    private final ApplicationProcessingServiceImplV2 applicationProcessingServiceImplV2;
+    private final WorkflowAuditProcessingServiceImpl workflowAuditProcessingService;
+    private final WorkflowESSyncServiceImpl workflowESSyncServiceImpl;
 
     @KafkaListener(groupId = "workflowContentTopic-consumer-v2", topics = "${kafka.topics.workflow.request.v2}")
     public void processMessage(ConsumerRecord<String, String> data) {
         try {
             if (StringUtils.isNoneBlank(data.value())) {
-                CompletableFuture.runAsync(() -> {
-                    processApplicationMessage(data.value());
-                });
+                CompletableFuture.runAsync(() -> processApplicationMessage(data.value()));
             } else {
                 logger.error("Error in Application Consumer: Invalid Kafka Msg");
             }
@@ -72,9 +64,7 @@ public class ApplicationProcessingConsumerV2 {
                 applicationProcessingServiceImplV2.processWfApplicationRequest(wfRequests, serviceName, userId, userToken);
                 applicationProcessingServiceImplV2.updateDepartmentToPortalDBs(wfRequests);
                 createAudit(wfRequests);
-                wfRequests.forEach(wfRequest -> {
-                    workflowESSyncServiceImpl.syncWithElasticService(wfRequest);
-                });
+                wfRequests.forEach(wfRequest -> workflowESSyncServiceImpl.syncWithElasticService(wfRequest));
                 logger.debug("Successfully processed workflow request with user ID: {}", userId);
             } catch (Exception e) {
                 logger.error("Error processing workflow request with wf ID: {}", userId, e);

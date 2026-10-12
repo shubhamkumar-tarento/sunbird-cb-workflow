@@ -17,7 +17,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -65,7 +64,7 @@ class UserUtilTest {
         when(requestServiceImpl.fetchResultUsingGet(any(StringBuilder.class))).thenReturn(null);
 
         Map<String, Object> out = userUtil.userProfileRead(userId);
-        assertNull(out);
+        assertTrue(out.isEmpty());
     }
 
     @Test
@@ -80,7 +79,7 @@ class UserUtilTest {
         when(requestServiceImpl.fetchResultUsingGet(any(StringBuilder.class))).thenReturn(response);
 
         Map<String, Object> out = userUtil.userProfileRead(userId);
-        assertNull(out);
+        assertTrue(out.isEmpty());
     }
 
     @Test
@@ -95,7 +94,7 @@ class UserUtilTest {
         when(requestServiceImpl.fetchResultUsingGet(any(StringBuilder.class))).thenReturn(response);
 
         Map<String, Object> out = userUtil.userProfileRead(userId);
-        assertNull(out);
+        assertTrue(out.isEmpty());
     }
 
     @Test
@@ -112,7 +111,7 @@ class UserUtilTest {
         when(requestServiceImpl.fetchResultUsingGet(any(StringBuilder.class))).thenReturn(response);
 
         Map<String, Object> out = userUtil.userProfileRead(userId);
-        assertNull(out);
+        assertTrue(out.isEmpty());
     }
 }
 

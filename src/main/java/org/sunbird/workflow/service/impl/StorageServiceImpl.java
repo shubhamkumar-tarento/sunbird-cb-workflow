@@ -3,13 +3,15 @@ package org.sunbird.workflow.service.impl;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -26,16 +28,14 @@ import org.sunbird.workflow.utils.ProjectUtil;
 import scala.Option;
 
 @Service
+@RequiredArgsConstructor
 public class StorageServiceImpl implements StorageService {
 
     private Logger logger = LoggerFactory.getLogger(getClass().getName());
     private BaseStorageService storageService = null;
 
-    @Autowired
-    RestTemplate restTemplate;
-
-    @Autowired
-    private Configuration configuration;
+    private final RestTemplate restTemplate;
+    private final Configuration configuration;
 
     @PostConstruct
     public void init() {
@@ -54,10 +54,12 @@ public class StorageServiceImpl implements StorageService {
         File file = null;
         try {
             file = new File(System.currentTimeMillis() + "_" + mFile.getOriginalFilename());
-            file.createNewFile();
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(mFile.getBytes());
-            fos.close();
+            if (!file.createNewFile()) {
+                logger.warn("Failed to create temp file: {}", file.getAbsolutePath());
+            }
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(mFile.getBytes());
+            }
             return uploadFile(file, cloudFolderName, containerName);
         } catch (Exception e) {
             logger.error("Failed to Upload File Exception", e);
@@ -67,7 +69,11 @@ public class StorageServiceImpl implements StorageService {
             return response;
         } finally {
             if (file != null) {
-                file.delete();
+                try {
+                    Files.delete(file.toPath());
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
+                }
             }
         }
     }
@@ -108,18 +114,24 @@ public class StorageServiceImpl implements StorageService {
             return response;
         } finally {
             if (file != null) {
-                file.delete();
+                try {
+                    Files.delete(file.toPath());
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
+                }
             }
         }
     }
 
-    protected void finalize() {
+    @PreDestroy
+    public void closeStorageService() {
         try {
             if (storageService != null) {
                 storageService.closeContext();
                 storageService = null;
             }
         } catch (Exception e) {
+            logger.warn("Failed to close storage service context", e);
         }
     }
 

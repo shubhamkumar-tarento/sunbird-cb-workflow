@@ -5,17 +5,17 @@ import java.util.concurrent.CompletableFuture;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.service.UserBulkUploadService;
 
 @Service
+@RequiredArgsConstructor
 public class UserBulkUpdateConsumer {
 
-    @Autowired
-    UserBulkUploadService userBulkUploadService;
+    private final UserBulkUploadService userBulkUploadService;
 
     Logger logger = LogManager.getLogger(UserBulkUpdateConsumer.class);
 

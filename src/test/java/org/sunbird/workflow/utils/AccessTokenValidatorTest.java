@@ -37,7 +37,6 @@ class AccessTokenValidatorTest {
     @InjectMocks
     private AccessTokenValidator accessTokenValidator;
 
-    @Spy
     private AccessTokenValidator spyAccessTokenValidator;
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -52,6 +51,8 @@ class AccessTokenValidatorTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        spyAccessTokenValidator = org.mockito.Mockito.spy(new AccessTokenValidator(keyManager));
+
         // Mock PropertiesCache.getInstance().getProperty(...) if needed
         // Generate tokens for different scenarios
         validToken = generateToken("validUserId", Time.currentTime() + 1000, "expectedIssuer");
@@ -64,19 +65,19 @@ class AccessTokenValidatorTest {
     @Test
     void testVerifyUserToken_ExpiredToken() {
         String userId = accessTokenValidator.verifyUserToken(expiredToken);
-        assertEquals(Constants._UNAUTHORIZED, userId);
+        assertEquals(Constants.UNAUTHORIZED_USER_ID, userId);
     }
 
     @Test
     void testVerifyUserToken_InvalidSignature() {
         String userId = accessTokenValidator.verifyUserToken(invalidSignatureToken);
-        assertEquals(Constants._UNAUTHORIZED, userId);
+        assertEquals(Constants.UNAUTHORIZED_USER_ID, userId);
     }
 
     @Test
     void testVerifyUserToken_InvalidIssuer() {
         String userId = accessTokenValidator.verifyUserToken(invalidIssuerToken);
-        assertEquals(Constants._UNAUTHORIZED, userId);
+        assertEquals(Constants.UNAUTHORIZED_USER_ID, userId);
     }
 
     @Test
@@ -154,7 +155,7 @@ class AccessTokenValidatorTest {
 
     @Test
     void testCheckIss_invalidIssuer_returnsFalse() throws Exception {
-        validator = new AccessTokenValidator();
+        validator = new AccessTokenValidator(keyManager);
 
         Method method = AccessTokenValidator.class.getDeclaredMethod("checkIss", String.class);
         method.setAccessible(true);
@@ -166,7 +167,7 @@ class AccessTokenValidatorTest {
 
     @Test
     void testCheckIss_blankIssuer_returnsFalse() throws Exception {
-        validator = new AccessTokenValidator();
+        validator = new AccessTokenValidator(keyManager);
 
         Method method = AccessTokenValidator.class.getDeclaredMethod("checkIss", String.class);
         method.setAccessible(true);

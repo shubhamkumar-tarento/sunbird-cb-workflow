@@ -16,9 +16,8 @@ class LRUCacheTest {
 
     @BeforeEach
     void setUp() {
-        cache = new LRUCache<>();
         mockConfig = mock(Configuration.class);
-        cache.conf = mockConfig;
+        cache = new LRUCache<>(mockConfig);
 
         // Simulate a very small cache and short TTL
         when(mockConfig.getEnrolStatusCountLocalCacheSize()).thenReturn(2);

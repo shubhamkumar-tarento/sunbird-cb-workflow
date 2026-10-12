@@ -7,7 +7,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -29,31 +28,29 @@ import java.util.concurrent.CompletableFuture;
 public class NotificationConsumer {
 	Logger logger = LogManager.getLogger(NotificationConsumer.class);
 
-	@Autowired
-	private ObjectMapper mapper;
+	private final ObjectMapper mapper;
+	private final NotificationServiceImpl notificationService;
+	private final CassandraOperation cassandraOperation;
+	private final Configuration configuration;
 
-	@Autowired
-	@Lazy
-	private NotificationServiceImpl notificationService;
-
-	@Autowired
-	private CassandraOperation cassandraOperation;
-
-	@Autowired
-	private Configuration configuration;
+	public NotificationConsumer(ObjectMapper mapper, @Lazy NotificationServiceImpl notificationService,
+			CassandraOperation cassandraOperation, Configuration configuration) {
+		this.mapper = mapper;
+		this.notificationService = notificationService;
+		this.cassandraOperation = cassandraOperation;
+		this.configuration = configuration;
+	}
 
 	@KafkaListener(groupId = "workflowNotificationTopic-consumer", topics = "${kafka.topics.workflow.notification}")
 	public void processMessage(ConsumerRecord<String, String> data) {
 		try {
             if (StringUtils.isNoneBlank(data.value())) {
-                CompletableFuture.runAsync(() -> {
-                    processNotificationRequest(data.value());
-                });
+                CompletableFuture.runAsync(() -> processNotificationRequest(data.value()));
             } else {
                 logger.error("Error in Notification Consumer: Invalid Kafka Msg");
             }
         } catch (Exception e) {
-            logger.error(String.format("Error in Notification Consumer: Error Msg :%s", e.getMessage()), e);
+            logger.error("Error in Notification Consumer: Error Msg :{}", e.getMessage(), e);
         }
 	}
 

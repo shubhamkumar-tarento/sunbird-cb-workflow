@@ -7,7 +7,6 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.poi.util.StringUtil;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Page;
@@ -48,55 +47,52 @@ import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class WorkflowServiceImpl implements Workflowservice {
 
-	@Autowired
-	private WfStatusRepo wfStatusRepo;
-
-	@Autowired
-	private WfAuditRepo wfAuditRepo;
-
-	@Autowired
-	private ObjectMapper mapper;
-
-	@Autowired
-	private Configuration configuration;
-
-	@Autowired
-	@Lazy
-	private UserProfileWfService userProfileWfService;
-
-	@Autowired
-	private RequestServiceImpl requestServiceImpl;
-
-	@Autowired
-	private Producer producer;
-
-	@Autowired
-	private CassandraOperation cassandraOperation;
-
-	@Autowired
-	AccessTokenValidator accessTokenValidator;
+	private final WfStatusRepo wfStatusRepo;
+	private final WfAuditRepo wfAuditRepo;
+	private final ObjectMapper mapper;
+	private final Configuration configuration;
+	private final UserProfileWfService userProfileWfService;
+	private final RequestServiceImpl requestServiceImpl;
+	private final Producer producer;
+	private final CassandraOperation cassandraOperation;
+	private final AccessTokenValidator accessTokenValidator;
 
 	Logger log = LogManager.getLogger(WorkflowServiceImpl.class);
 
-	@Autowired
-	LRUCache<String, List<WfStatusCountDTO>> localCache ;
+	private static final String INVALID_USER_TOKEN = "Invalid User Token";
+	private static final String RECORD_NOT_FOUND_LOG_PREFIX = "Record not found in :";
 
-	@Autowired
-	StorageService storageService;
+	private final LRUCache<String, List<WfStatusCountDTO>> localCache;
+	private final StorageService storageService;
+	private final Producer kafkaProducer;
+	private final ElasticsearchServiceManager eServiceManager;
+	private final NotificationTriggerService notificationTriggerService;
 
-	@Autowired
-	Producer kafkaProducer;
-
-	@Autowired
-	ElasticsearchServiceManager eServiceManager;
-
-	@Autowired
-	NotificationTriggerService notificationTriggerService;
+	public WorkflowServiceImpl(WfStatusRepo wfStatusRepo, WfAuditRepo wfAuditRepo, ObjectMapper mapper,
+			Configuration configuration, @Lazy UserProfileWfService userProfileWfService,
+			RequestServiceImpl requestServiceImpl, Producer producer, CassandraOperation cassandraOperation,
+			AccessTokenValidator accessTokenValidator, LRUCache<String, List<WfStatusCountDTO>> localCache,
+			StorageService storageService, Producer kafkaProducer, ElasticsearchServiceManager eServiceManager,
+			NotificationTriggerService notificationTriggerService) {
+		this.wfStatusRepo = wfStatusRepo;
+		this.wfAuditRepo = wfAuditRepo;
+		this.mapper = mapper;
+		this.configuration = configuration;
+		this.userProfileWfService = userProfileWfService;
+		this.requestServiceImpl = requestServiceImpl;
+		this.producer = producer;
+		this.cassandraOperation = cassandraOperation;
+		this.accessTokenValidator = accessTokenValidator;
+		this.localCache = localCache;
+		this.storageService = storageService;
+		this.kafkaProducer = kafkaProducer;
+		this.eServiceManager = eServiceManager;
+		this.notificationTriggerService = notificationTriggerService;
+	}
 
 	/**
 	 * Change the status of workflow application
@@ -131,24 +127,20 @@ public class WorkflowServiceImpl implements Workflowservice {
 			for (HashMap<String, Object> updatedField : wfRequest.getUpdateFieldValues()) {
 				wfRequest.setUpdateFieldValues(new ArrayList<>(Arrays.asList(updatedField)));
 				wfRequest.setWfId(wfId);
-				if (!StringUtils.isEmpty(wfRequest.getServiceName())) {
-					if (StringUtils.isEmpty(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)) {
-						if (handleProfileServiceWorkflow(wfRequest, response, data)) {
-							return response;
-						}
-					}
+				if (StringUtils.hasLength(wfRequest.getServiceName())
+						&& !StringUtils.hasLength(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)
+						&& handleProfileServiceWorkflow(wfRequest, response, data)) {
+					return response;
 				}
 				changeStatusResponse = changeStatus(rootOrg, org, wfRequest, userId, role);
 				wfIds.add(changeStatusResponse.get(Constants.WF_ID_CONSTANT));
 				changedStatus = changeStatusResponse.get(Constants.STATUS);
 			}
 		} else {
-			if (!StringUtils.isEmpty(wfRequest.getServiceName())) {
-				if (StringUtils.isEmpty(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)) {
-					if (handleProfileServiceWorkflow(wfRequest, response, data)) {
-						return response;
-					}
-				}
+			if (StringUtils.hasLength(wfRequest.getServiceName())
+					&& !StringUtils.hasLength(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)
+					&& handleProfileServiceWorkflow(wfRequest, response, data)) {
+				return response;
 			}
 			changeStatusResponse = changeStatus(rootOrg, org, wfRequest, userId, role);
 			wfIds.add(changeStatusResponse.get(Constants.WF_ID_CONSTANT));
@@ -179,7 +171,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			WfStatusEntity applicationStatus = wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(rootOrg, org,
 					wfRequest.getApplicationId(), wfRequest.getWfId());
 			String serviceName=wfRequest.getServiceName();
-			if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName()) && !StringUtils.isEmpty(applicationStatus.getServiceName())) {
+			if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName()) && StringUtils.hasLength(applicationStatus.getServiceName())) {
 				serviceName = applicationStatus.getServiceName();
 			}
 			if (applicationStatus != null && applicationStatus.getCreatedOn() != null) {
@@ -203,7 +195,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 				applicationStatus.setRootOrg(rootOrg);
 				applicationStatus.setOrg(org);
 				applicationStatus.setCreatedOn(new Date());
-				if (!StringUtils.isEmpty(wfRequest.getRequestType())) {
+				if (StringUtils.hasLength(wfRequest.getRequestType())) {
 					applicationStatus.setRequestType(wfRequest.getRequestType());
 				}
 				wfRequest.setWfId(wfId);
@@ -221,72 +213,13 @@ public class WorkflowServiceImpl implements Workflowservice {
 			applicationStatus.setComment(wfRequest.getComment());
 			applicationStatus.setServiceName(serviceName);
 			addModificationEntry(applicationStatus,userId,wfRequest.getAction(),role);
-			String fieldKey = null;
 			WfStatusEntity savedEntity = wfStatusRepo.save(applicationStatus);
 			if (Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(applicationStatus.getRequestType())) {
-				log.info("Entering transfer request handling for userId: {}", applicationStatus.getUserId());
-				List<WfStatusEntity> listEntities = wfStatusRepo.findByUserIdAndCurrentStatus(savedEntity.getUserId(), Constants.SEND_FOR_APPROVAL, Boolean.TRUE);
-				Map<String, WfStatusEntity> entityMap = listEntities.stream()
-						.collect(Collectors.toMap(WfStatusEntity::getWfId, Function.identity()));
-				Map<String, Object> payload = new HashMap<>();
-				payload.put(Constants.ORG_TRANSFER_STATE, nextState);
-				payload.put(Constants.inWorkflow, inWorkflow);
-				payload.put(Constants.GROUP_DESGINATION_ENTITIES, new ArrayList<>(entityMap.values()));
-				producer.push(configuration.getTransferRequestStatusChangeTopic(), payload);
-				log.info(" Transfer status change message sent successfully for userId: {}", savedEntity.getUserId());
+				pushOrgTransferStatusChangeEvent(savedEntity, nextState, inWorkflow);
 			}
-			List<HashMap<String, Object>> updatedValueList = wfRequest.getUpdateFieldValues();
-			for(Map<String, Object> updatedValue : updatedValueList){
-				if(updatedValue.containsKey(Constants.TO_VALUE)){
-					Map<String, Object> toValue = (Map<String, Object>) updatedValue.get(Constants.TO_VALUE);
-					fieldKey = toValue.entrySet().stream().findFirst().get().getKey();
-				}
-			}
-			if(!StringUtils.isEmpty(fieldKey) && Constants.NAME.equalsIgnoreCase(fieldKey)){
-				Map<String, Object> propertyMap = new HashMap<>();
-				propertyMap.put(Constants.ID, wfRequest.getApplicationId());
-				List<Map<String, Object>> userDetails = cassandraOperation.getRecordsByProperties(
-						Constants.KEYSPACE_SUNBIRD, Constants.USER_TABLE, propertyMap, Arrays.asList(Constants.ROOT_ORG_ID));
-				String rootOrgId = null;
-				if (!CollectionUtils.isEmpty(userDetails)) {
-					rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
-				}
-				wfRequest.setPreviousRootOrgId(rootOrgId);
-			}
-
-			if (Constants.AI_ASSESSMENT_SERVICE_NAME
-					.equalsIgnoreCase(applicationStatus.getServiceName())) {
-
-				// APPROVED push is handled by AiAssessmentServiceImpl (needs auth token)
-				if (Constants.PENDING
-						.equalsIgnoreCase(applicationStatus.getCurrentStatus())
-						|| Constants.REJECTED
-						.equalsIgnoreCase(applicationStatus.getCurrentStatus())) {
-					producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
-					log.info("Pushed to notification topic for state: {} userId: {}",
-							applicationStatus.getCurrentStatus(), wfRequest.getUserId());
-				}
-
-			} else {
-				producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
-				producer.push(configuration.getWorkflowApplicationTopic(), wfRequest);
-			}
-
-			StringBuilder url = new StringBuilder(configuration.getLmsServiceHost()).append(configuration.getLmsUserSearchEndPoint());
-			Map<String, Object> request = buildUserSearchRequest(wfRequest.getUserId());
-			Map<String, Object> updateResponse = (Map<String, Object>) requestServiceImpl.fetchResultUsingPost(url, request, Map.class, null);
-			if (updateResponse != null
-					&& "OK".equalsIgnoreCase((String) updateResponse.get(Constants.RESPONSE_CODE))) {
-				if(hasCommunityModeratorRole(updateResponse) && Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(savedEntity.getRequestType())) {
-					log.info("User {} has role COMMUNITY_MODERATOR. Triggering Kafka event...", wfRequest.getUserId());
-					producer.push(configuration.getCommunityModeratorTransferTopic(), wfRequest);
-				} else {
-					log.info("User {} does NOT have COMMUNITY_MODERATOR role. No Kafka event triggered.", wfRequest.getUserId());
-				}
-			} else {
-				log.error("Failed to retrieve user details OR response code not OK for userId: {}. No Kafka event triggered.",
-						wfRequest.getUserId());
-			}
+			updatePreviousRootOrgIdOnNameChange(wfRequest);
+			pushWorkflowNotificationEvents(wfRequest, applicationStatus);
+			triggerCommunityModeratorEventIfApplicable(wfRequest, savedEntity);
 		} catch (IOException e) {
 			throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
 		}
@@ -295,12 +228,88 @@ public class WorkflowServiceImpl implements Workflowservice {
 		return data;
 	}
 
+	private void pushOrgTransferStatusChangeEvent(WfStatusEntity savedEntity, String nextState, Boolean inWorkflow) {
+		log.info("Entering transfer request handling for userId: {}", savedEntity.getUserId());
+		List<WfStatusEntity> listEntities = wfStatusRepo.findByUserIdAndCurrentStatus(savedEntity.getUserId(), Constants.SEND_FOR_APPROVAL, Boolean.TRUE);
+		Map<String, WfStatusEntity> entityMap = listEntities.stream()
+				.collect(Collectors.toMap(WfStatusEntity::getWfId, Function.identity()));
+		Map<String, Object> payload = new HashMap<>();
+		payload.put(Constants.ORG_TRANSFER_STATE, nextState);
+		payload.put(Constants.IN_WORKFLOW_KEY, inWorkflow);
+		payload.put(Constants.GROUP_DESGINATION_ENTITIES, new ArrayList<>(entityMap.values()));
+		producer.push(configuration.getTransferRequestStatusChangeTopic(), payload);
+		log.info(" Transfer status change message sent successfully for userId: {}", savedEntity.getUserId());
+	}
+
+	private String extractFirstToValueFieldKey(WfRequest wfRequest) {
+		String fieldKey = null;
+		List<HashMap<String, Object>> updatedValueList = wfRequest.getUpdateFieldValues();
+		for (Map<String, Object> updatedValue : updatedValueList) {
+			if (updatedValue.containsKey(Constants.TO_VALUE)) {
+				Map<String, Object> toValue = (Map<String, Object>) updatedValue.get(Constants.TO_VALUE);
+				Optional<Map.Entry<String, Object>> firstEntry = toValue.entrySet().stream().findFirst();
+				if (firstEntry.isPresent()) {
+					fieldKey = firstEntry.get().getKey();
+				}
+			}
+		}
+		return fieldKey;
+	}
+
+	private void updatePreviousRootOrgIdOnNameChange(WfRequest wfRequest) {
+		String fieldKey = extractFirstToValueFieldKey(wfRequest);
+		if (StringUtils.hasLength(fieldKey) && Constants.NAME.equalsIgnoreCase(fieldKey)) {
+			Map<String, Object> propertyMap = new HashMap<>();
+			propertyMap.put(Constants.ID, wfRequest.getApplicationId());
+			List<Map<String, Object>> userDetails = cassandraOperation.getRecordsByProperties(
+					Constants.KEYSPACE_SUNBIRD, Constants.USER_TABLE, propertyMap, Arrays.asList(Constants.ROOT_ORG_ID));
+			String rootOrgId = null;
+			if (!CollectionUtils.isEmpty(userDetails)) {
+				rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
+			}
+			wfRequest.setPreviousRootOrgId(rootOrgId);
+		}
+	}
+
+	private void pushWorkflowNotificationEvents(WfRequest wfRequest, WfStatusEntity applicationStatus) {
+		if (Constants.AI_ASSESSMENT_SERVICE_NAME.equalsIgnoreCase(applicationStatus.getServiceName())) {
+			// APPROVED push is handled by AiAssessmentServiceImpl (needs auth token)
+			if (Constants.PENDING.equalsIgnoreCase(applicationStatus.getCurrentStatus())
+					|| Constants.REJECTED.equalsIgnoreCase(applicationStatus.getCurrentStatus())) {
+				producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
+				log.info("Pushed to notification topic for state: {} userId: {}",
+						applicationStatus.getCurrentStatus(), wfRequest.getUserId());
+			}
+		} else {
+			producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);
+			producer.push(configuration.getWorkflowApplicationTopic(), wfRequest);
+		}
+	}
+
+	private void triggerCommunityModeratorEventIfApplicable(WfRequest wfRequest, WfStatusEntity savedEntity) {
+		StringBuilder url = new StringBuilder(configuration.getLmsServiceHost()).append(configuration.getLmsUserSearchEndPoint());
+		Map<String, Object> request = buildUserSearchRequest(wfRequest.getUserId());
+		Map<String, Object> updateResponse = (Map<String, Object>) requestServiceImpl.fetchResultUsingPost(url, request, Map.class, null);
+		if (updateResponse != null
+				&& "OK".equalsIgnoreCase((String) updateResponse.get(Constants.RESPONSE_CODE))) {
+			if (hasCommunityModeratorRole(updateResponse) && Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(savedEntity.getRequestType())) {
+				log.info("User {} has role COMMUNITY_MODERATOR. Triggering Kafka event...", wfRequest.getUserId());
+				producer.push(configuration.getCommunityModeratorTransferTopic(), wfRequest);
+			} else {
+				log.info("User {} does NOT have COMMUNITY_MODERATOR role. No Kafka event triggered.", wfRequest.getUserId());
+			}
+		} else {
+			log.error("Failed to retrieve user details OR response code not OK for userId: {}. No Kafka event triggered.",
+					wfRequest.getUserId());
+		}
+	}
+
 	private void addModificationEntry(WfStatusEntity applicationStatus,String userId,String action,String role) throws IOException {
-		if(!StringUtils.isEmpty(userId) &&
+		if(StringUtils.hasLength(userId) &&
 				Arrays.asList(configuration.getModificationRecordAllowActions().split(Constants.COMMA)).contains(action)) {
 			List<Map<String, Object>> historyMap = null;
 			String history = applicationStatus.getModificationHistory();
-			if (!StringUtils.isEmpty(history))
+			if (StringUtils.hasLength(history))
 				historyMap = mapper.readValue(history, List.class);
 			else
 				historyMap = new ArrayList<>();
@@ -400,58 +409,13 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 */
 	private void validateUserAndWfStatus(WfRequest wfRequest, WfStatus wfStatus, WfStatusEntity applicationStatus) {
 
-		if (StringUtils.isEmpty(wfRequest.getWfId()) && !wfStatus.getStartState()) {
+		if (!StringUtils.hasLength(wfRequest.getWfId()) && !Boolean.TRUE.equals(wfStatus.getStartState())) {
 			throw new ApplicationException(Constants.WORKFLOW_ID_ERROR_MESSAGE);
 		}
 		if ((!ObjectUtils.isEmpty(applicationStatus))
 				&& (!wfRequest.getState().equalsIgnoreCase(applicationStatus.getCurrentStatus()))) {
 			throw new BadRequestException("Application is in " + applicationStatus.getCurrentStatus()
 					+ " State but trying to be move in " + wfRequest.getState() + " state!");
-		}
-	}
-
-	/**
-	 * @param nextActions
-	 * @return String of next actions
-	 */
-	private String getNextApplicableActions(List<WfAction> nextActions) {
-		String applicableAction = null;
-		List<HashMap<String, Object>> nextActionArray = new ArrayList<>();
-		try {
-			if (CollectionUtils.isEmpty(nextActions)) {
-				applicableAction = mapper.writeValueAsString(nextActions);
-			} else {
-				HashMap<String, Object> actionMap = null;
-				for (WfAction action : nextActions) {
-					actionMap = new HashMap<>();
-					actionMap.put(Constants.ACTION_CONSTANT, action.getAction());
-					actionMap.put(Constants.ROLES_CONSTANT, action.getRoles());
-					nextActionArray.add(actionMap);
-				}
-				applicableAction = mapper.writeValueAsString(nextActionArray);
-			}
-		} catch (IOException e) {
-			throw new ApplicationException(Constants.JSON_PARSING_ERROR, e);
-		}
-		return applicableAction;
-	}
-
-	/**
-	 * Validate roles of actor with action role
-	 *
-	 * @param actorRoles
-	 * @param actionRoles
-	 */
-	private void validateRoles(List<String> actorRoles, List<String> actionRoles) {
-		if ((CollectionUtils.isEmpty(actionRoles))
-				|| (CollectionUtils.isEmpty(actorRoles) && CollectionUtils.isEmpty(actionRoles)))
-			return;
-		if (CollectionUtils.isEmpty(actorRoles)) {
-			throw new ApplicationException(Constants.WORKFLOW_ROLE_ERROR);
-		}
-		boolean roleFound = actorRoles.stream().anyMatch(actionRoles::contains);
-		if (!roleFound) {
-			throw new BadRequestException(Constants.WORKFLOW_ROLE_CHECK_ERROR);
 		}
 	}
 
@@ -506,23 +470,23 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 */
 	private void validateWfRequest(WfRequest wfRequest) {
 
-		if (StringUtils.isEmpty(wfRequest.getState())) {
+		if (!StringUtils.hasLength(wfRequest.getState())) {
 			throw new InvalidDataInputException(Constants.STATE_VALIDATION_ERROR);
 		}
 
-		if (StringUtils.isEmpty(wfRequest.getApplicationId())) {
+		if (!StringUtils.hasLength(wfRequest.getApplicationId())) {
 			throw new InvalidDataInputException(Constants.APPLICATION_ID_VALIDATION_ERROR);
 		}
 
-		if (StringUtils.isEmpty(wfRequest.getActorUserId())) {
+		if (!StringUtils.hasLength(wfRequest.getActorUserId())) {
 			throw new InvalidDataInputException(Constants.ACTOR_UUID_VALIDATION_ERROR);
 		}
 
-		if (StringUtils.isEmpty(wfRequest.getUserId())) {
+		if (!StringUtils.hasLength(wfRequest.getUserId())) {
 			throw new InvalidDataInputException(Constants.USER_UUID_VALIDATION_ERROR);
 		}
 
-		if (StringUtils.isEmpty(wfRequest.getAction())) {
+		if (!StringUtils.hasLength(wfRequest.getAction())) {
 			throw new InvalidDataInputException(Constants.ACTION_VALIDATION_ERROR);
 		}
 
@@ -530,7 +494,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			throw new InvalidDataInputException(Constants.FIELD_VALUE_VALIDATION_ERROR);
 		}
 
-		if (StringUtils.isEmpty(wfRequest.getServiceName())) {
+		if (!StringUtils.hasLength(wfRequest.getServiceName())) {
 			throw new InvalidDataInputException(Constants.WORKFLOW_SERVICENAME_VALIDATION_ERROR);
 		}
 
@@ -647,7 +611,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		HashMap<String, List<WfAuditEntity>> history = new HashMap<>();
 
 		for (WfAuditEntity audit : wfAuditEntityList) {
-			if (StringUtils.isEmpty(history.get(audit.getWfId()))) {
+			if (history.get(audit.getWfId()) == null) {
 				List<WfAuditEntity> wfAuditEntities = new ArrayList<>(Arrays.asList(audit));
 				history.put(audit.getWfId(), wfAuditEntities);
 			} else {
@@ -658,28 +622,6 @@ public class WorkflowServiceImpl implements Workflowservice {
 		response.put(Constants.DATA, history);
 		response.put(Constants.STATUS, HttpStatus.OK);
 		return response;
-	}
-
-	/**
-	 * @param userId userId
-	 * @return list of roles for user
-	 */
-	private List<String> getUserRoles(String userId) {
-		List<String> roleList;
-		StringBuilder builder = new StringBuilder();
-		String endPoint = configuration.getUserRoleSearchEndpoint().replace("{user_id}", userId);
-		builder.append(configuration.getLexCoreServiceHost()).append(endPoint);
-		Map<String, Object> response = (Map<String, Object>) requestServiceImpl.fetchResultUsingGet(builder);
-		List<String> defaultRoles = new ArrayList<>();
-		List<String> userRoles = new ArrayList<>();
-		if (!ObjectUtils.isEmpty(response.get("default_roles"))) {
-			defaultRoles = (List<String>) response.get("default_roles");
-		}
-		if (!ObjectUtils.isEmpty(response.get("user_roles"))) {
-			userRoles = (List<String>) response.get("user_roles");
-		}
-		roleList = Stream.concat(userRoles.stream(), defaultRoles.stream()).distinct().collect(Collectors.toList());
-		return roleList;
 	}
 
 	public Response applicationSerachOnApplicationIdGrup(String rootOrg, SearchCriteria criteria) {
@@ -739,8 +681,10 @@ public class WorkflowServiceImpl implements Workflowservice {
 		applicationStatus.setLastUpdatedOn(new Date());
 		applicationStatus.setCurrentStatus(Constants.APPROVED_STATE);
 		applicationStatus.setActorUUID(wfRequest.getActorUserId());
-		applicationStatus
-				.setDeptName(getDepartmentDetails(wfRequest.getUpdateFieldValues().stream().findFirst().get()));
+		Optional<HashMap<String, Object>> firstFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
+		if (firstFieldValue.isPresent()) {
+			applicationStatus.setDeptName(getDepartmentDetails(firstFieldValue.get()));
+		}
 		wfRequest.setWfId(wfId);
 		wfRequest.setAction(Constants.APPROVE_STATE);
 		wfRequest.setState(Constants.APPROVED_STATE);
@@ -762,17 +706,6 @@ public class WorkflowServiceImpl implements Workflowservice {
 		response.put(Constants.STATUS, HttpStatus.OK);
 		return response;
 	}
-
-    /*@Override
-	public Response getUserWf(String rootOrg, String org, String wid, SearchCriteria criteria) {
-		List<WfStatusEntity> wfStatusEntities = wfStatusRepo.findByRootOrgAndOrgAndServiceNameAndCurrentStatusAndUserId(
-				rootOrg, org, criteria.getServiceName(), criteria.getApplicationStatus(), wid);
-		Response response = new Response();
-		response.put(Constants.MESSAGE, Constants.SUCCESSFUL);
-		response.put(Constants.DATA, wfStatusEntities);
-		response.put(Constants.STATUS, HttpStatus.OK);
-		return response;
-	}*/
 
 	public Response appsSearchV2(String rootOrg, SearchCriteriaV2 criteria) {
 		Map<String, List<WfStatusEntity>> infos =null;
@@ -810,7 +743,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			totalRequestCount = applicationIdsPage.getTotalElements();
 		}
 		List<WfStatusEntity> wfStatusEntities = null;
-		if (!StringUtils.isEmpty(criteria.getDeptName())) {
+		if (StringUtils.hasLength(criteria.getDeptName())) {
 			if (searchEnabled==true) {
 				if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(criteria.getServiceName())) {
 					List<String> eligibleServiceNames = new ArrayList<>();
@@ -863,7 +796,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private String getDepartmentDetails(HashMap<String, Object> updatedDeptvalue) {
-		HashMap<String, String> toValue = (HashMap<String, String>) updatedDeptvalue.get("toValue");
+		HashMap<String, String> toValue = (HashMap<String, String>) updatedDeptvalue.get(Constants.TO_VALUE);
 		return toValue.get("departmentName").isEmpty() ? "" : toValue.get("departmentName");
 	}
 
@@ -885,11 +818,11 @@ public class WorkflowServiceImpl implements Workflowservice {
 		};
 		Map<String,Object> toValuesMap = new HashMap<>();
 		for (String fields : updatedFieldValues) {
-			if (!StringUtils.isEmpty(fields)) {
+			if (StringUtils.hasLength(fields)) {
 				try {
 					List<HashMap<String, Object>> values = mapper.readValue(fields, typeRef);
 					for (HashMap<String, Object> wffieldReq : values) {
-						HashMap<String, Object> toValueMap = (HashMap<String, Object>) wffieldReq.get("toValue");
+						HashMap<String, Object> toValueMap = (HashMap<String, Object>) wffieldReq.get(Constants.TO_VALUE);
 						toValuesMap.put(toValueMap.entrySet().iterator().next().getKey(),toValueMap.entrySet().iterator().next().getValue());
 					}
 				} catch (IOException e) {
@@ -1031,7 +964,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 				}
 			}
 			Integer numOfUpdatedRecords = wfStatusRepo.updatePendingRequestsToNewMDO(userId, serviceName, currentStatus, newDeptName);
-			log.info(String.format("The number of records updated for user: %s is %d", userId, numOfUpdatedRecords));
+			log.info("The number of records updated for user: {} is {}", userId, numOfUpdatedRecords);
 			response.put(Constants.MESSAGE, Constants.SUCCESSFUL);
 			response.put(Constants.STATUS, HttpStatus.OK);
 		} catch (Exception e) {
@@ -1049,8 +982,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_USER_BULK_UPDATE_STATUS);
 		try {
 			String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
-			if (StringUtils.isEmpty(userId)) {
-				setErrorData(response, "Invalid User Token");
+			if (!StringUtils.hasLength(userId)) {
+				setErrorData(response, INVALID_USER_TOKEN);
 				response.setResponseCode(HttpStatus.BAD_REQUEST);
 				log.error("Failed to get uploaded file status. Error: Invalid user token");
 				return response;
@@ -1062,7 +995,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			
 			if (userDetails.isEmpty()) {
 				setErrorData(response, String.format("Failed to get uploaded file status. Error: User not found for Id: %s", userId));
-				log.error("Record not found in :" + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
+				log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
 				return response;
 			}
 			String rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
@@ -1080,7 +1013,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		} catch (Exception e) {
 			log.error("An Exception Occurred", e);
 			setErrorData(response,
-					String.format("Failed to get records from user_bulk_update table. Error: ", e.getMessage()));
+					String.format("Failed to get records from user_bulk_update table. Error: %s", e.getMessage()));
 		}
 		return response;
 	}
@@ -1089,8 +1022,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_USER_BULK_UPDATE);
 		try {
 			String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
-			if (StringUtils.isEmpty(userId)) {
-				setErrorData(response, "Invalid User Token");
+			if (!StringUtils.hasLength(userId)) {
+				setErrorData(response, INVALID_USER_TOKEN);
 				response.setResponseCode(HttpStatus.BAD_REQUEST);
 				log.error("Failed to process bulk update. Error: Invalid user token");
 				return response;
@@ -1102,7 +1035,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			
 			if (userDetails.isEmpty()) {
 				setErrorData(response, String.format("Failed to upload file. Error: User not found for Id: %s", userId));
-				log.error("Record not found in :" + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
+				log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
 				return response;
 			}
 
@@ -1139,7 +1072,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		} catch(Exception e){
 			log.error("Failed to process bulk upload request. Exception: ", e);
 			setErrorData(response,
-					String.format("Failed to process user bulk upload request. Error: ", e.getMessage()));
+					String.format("Failed to process user bulk upload request. Error: %s", e.getMessage()));
 		}
 		return response;
 	}
@@ -1219,7 +1152,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		response.put(Constants.MESSAGE, Constants.SUCCESSFUL);
 		try {
 			List<Object[]> updatedFieldValues = null;
-			if (!StringUtils.isEmpty(criteria.getApplicationStatus())) {
+			if (StringUtils.hasLength(criteria.getApplicationStatus())) {
 				updatedFieldValues = wfStatusRepo.findWfFieldsForUserV2(criteria.getServiceName(), criteria.getApplicationStatus(), wid);
 			} else {
 				updatedFieldValues = wfStatusRepo.findWfFieldsForUserV2(criteria.getServiceName(), wid);
@@ -1233,7 +1166,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 					List<HashMap<String, Object>> values = mapper.readValue((String) fields[0], typeRef);
 					for (HashMap<String, Object> wffieldReq : values) {
 						Map<String, Object> resultData = new LinkedHashMap<>();
-						HashMap<String, Object> toValueMap = (HashMap<String, Object>) wffieldReq.get("toValue");
+						HashMap<String, Object> toValueMap = (HashMap<String, Object>) wffieldReq.get(Constants.TO_VALUE);
 						resultData.put("wfId", fields[1]);
 						resultData.put(toValueMap.entrySet().iterator().next().getKey(), toValueMap.entrySet().iterator().next().getValue());
 						resultData.put(Constants.COMMENT, fields[2]);
@@ -1259,7 +1192,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			TypeReference<List<Map<String, Object>>> typeRef = new TypeReference<List<Map<String, Object>>>() {
 			};
 			for (Map<String, Object> userData : userDataList) {
-				List<WfStatusEntity> wfInfoList = (List<WfStatusEntity>) userData.get("wfInfo");
+				List<WfStatusEntity> wfInfoList = (List<WfStatusEntity>) userData.get(Constants.WF_INFO);
 				for (WfStatusEntity wfStatusEntity : wfInfoList) {
 					List<Map<String, Object>> valuesList;
 					valuesList = mapper.readValue(wfStatusEntity.getUpdateFieldValues(), typeRef);
@@ -1291,8 +1224,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_USER_BULK_UPDATE);
 		try {
 			String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
-			if (StringUtils.isEmpty(userId)) {
-				setErrorData(response, "Invalid User Token");
+			if (!StringUtils.hasLength(userId)) {
+				setErrorData(response, INVALID_USER_TOKEN);
 				response.setResponseCode(HttpStatus.BAD_REQUEST);
 				log.error("Failed to process bulk update. Error: Invalid user token");
 				return response;
@@ -1304,7 +1237,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 			if (userDetails.isEmpty()) {
 				setErrorData(response, String.format("Failed to upload file. Error: User not found for Id: %s", userId));
-				log.error("Record not found in :" + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
+				log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
 				return response;
 			}
 
@@ -1341,14 +1274,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 		} catch(Exception e){
 			log.error("Failed to process bulk upload request. Exception: ", e);
 			setErrorData(response,
-					String.format("Failed to process user bulk upload request. Error: ", e.getMessage()));
+					String.format("Failed to process user bulk upload request. Error: %s", e.getMessage()));
 		}
 		return response;
 	}
 
 	@Override
-	public ResponseEntity<?> downloadPendingRequestFile(String userAuthToken) {
-		ResponseEntity<?> responseEntity;
+	public ResponseEntity<Object> downloadPendingRequestFile(String userAuthToken) {
+		ResponseEntity<Object> responseEntity;
 		try {
 			Set<String> userIdSet = new HashSet<>();
 			String mdoUserId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
@@ -1372,7 +1305,11 @@ public class WorkflowServiceImpl implements Workflowservice {
 				for(Map<String, Object> valueToUpdate : valuesToBeUpdate){
 					if(valueToUpdate.containsKey(Constants.TO_VALUE)){
 						Map<String, Object> updateKeyValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
-						String keyToUpdate = updateKeyValue.keySet().stream().findFirst().get();
+						Optional<String> firstKey = updateKeyValue.keySet().stream().findFirst();
+						if (!firstKey.isPresent()) {
+							continue;
+						}
+						String keyToUpdate = firstKey.get();
 						if(Constants.DESIGNATION.equalsIgnoreCase(keyToUpdate) || Constants.GROUP.equalsIgnoreCase(keyToUpdate)){
 							userIdSet.add(wfStatusEntity.getUserId());
 							if(allPendingRequest.containsKey(wfStatusEntity.getUserId())) {
@@ -1401,9 +1338,13 @@ public class WorkflowServiceImpl implements Workflowservice {
 				return this.getNoPendingRequestAvailableResponse(Constants.NO_PENDING_GROUP_DESIGNATION_REQUEST_AVAILABLE_MESSAGE);
 			}
 			responseEntity = this.preparePendingRequestFileResponse(csvFilePath, allUserDetails.size());
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			log.error("Interrupted while downloading file with pending requests", ie);
+			responseEntity = ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<Object>build();
 		} catch (Exception e) {
 			log.error("An error occurred while downloading file with pending requests", e);
-			responseEntity =  ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+			responseEntity =  ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<Object>build();
 		}
 		return responseEntity;
 	}
@@ -1421,20 +1362,15 @@ public class WorkflowServiceImpl implements Workflowservice {
 			long totalResponseCount = 0;
 			Pageable pageable = getPageReqForApplicationSearch(criteria);
 			List<String> applicationIds = criteria.getApplicationIds();
-			List<Map<String, Object>> userProfiles = new ArrayList<Map<String, Object>>();
+			List<Map<String, Object>> userProfiles;
 			Map<String, Object> userInfoMap = new HashMap<String, Object>();
 			if (StringUtil.isNotBlank(criteria.getQuery())
 					&& criteria.getServiceName().equals(Constants.PROFILE_SERVICE_NAME)) {
-				if (StringUtil.isBlank(rootOrgId) && criteria.getRequestType() != null
-						&& (criteria.getRequestType().contains(Constants.GROUP_CHANGE)
-								|| criteria.getRequestType().contains(Constants.DESIGNATION_CHANGE))) {
+				if (isRootOrgRequiredButMissing(rootOrgId, criteria)) {
 					response.setResponseCode(HttpStatus.BAD_REQUEST);
 					response.put(Constants.MESSAGE, Constants.ROOT_ORG_ERROR_MESSAGE);
 					response.put(Constants.STATUS, HttpStatus.BAD_REQUEST);
 					return response;
-				}
-				if(CollectionUtils.isEmpty(applicationIds)) {
-					applicationIds = new ArrayList<String>();
 				}
 				totalSearchCount = eServiceManager.searchUsers(criteria.getQuery(), (int) pageable.getOffset(),
 						pageable.getPageSize(), userInfoMap, criteria.getDeptName(),
@@ -1443,57 +1379,23 @@ public class WorkflowServiceImpl implements Workflowservice {
 				log.info(
 						"ES returns {} number of userId for search using query: {}, departmentName: {} and requestTypes: {}",
 						userInfoMap.size(), criteria.getQuery(), criteria.getDeptName(),
-						criteria.getRequestType().toString());
+						criteria.getRequestType());
 			} else if (CollectionUtils.isEmpty(applicationIds)) {
-				Page<String> applicationIdsPage = null;
-				if (criteria.getRequestType().contains(Constants.ORG_TRANSFER_REQUEST)) {
-					totalResponseCount = wfStatusRepo.getCountOfDistinctUserIdsUsingServiceAndRequestTypeAndStatus(
-							criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
-							criteria.getRequestType());
-					applicationIdsPage = wfStatusRepo.getListOfDistinctUserIdsUsingRequestType(
-							criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
-							criteria.getRequestType(), pageable);
-				} else {
-					totalResponseCount = wfStatusRepo.getCountOfDistinctUserIdForProfileApproval(
-							criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
-							criteria.getRequestType(), Constants.ORG_TRANSFER_REQUEST);
-					applicationIdsPage = wfStatusRepo.getListOfDistinctUserIdsUsingRequestTypeForProfileApproval(
-							criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
-							criteria.getRequestType(), Constants.ORG_TRANSFER_REQUEST, pageable);
-				}
-				applicationIds = applicationIdsPage.getContent();
+				Map.Entry<List<String>, Long> applicationIdsAndCount = resolveApplicationIdsFromDb(criteria, pageable);
+				applicationIds = applicationIdsAndCount.getKey();
+				totalResponseCount = applicationIdsAndCount.getValue();
 			}
 
 			List<WfStatusEntity> wfStatusEntities = new ArrayList<>();
-			if (!StringUtils.isEmpty(criteria.getDeptName()) && !CollectionUtils.isEmpty(applicationIds)) {
+			if (StringUtils.hasLength(criteria.getDeptName()) && !CollectionUtils.isEmpty(applicationIds)) {
 				wfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndUserIdInAndRequestTypeIn(
 						criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), applicationIds, criteria.getRequestType());
 			}
 
 			if (StringUtil.isNotBlank(criteria.getQuery())) {
-				List<Map<String, Object>> esUserProfiles = new ArrayList<Map<String, Object>>();
 				// If query is present - we already searched the ES and got the details. Just
 				// add the wf details and return the data.
-				Map<String, List<WfStatusEntity>> wfInfos = wfStatusEntities.stream()
-						.collect(Collectors.groupingBy(WfStatusEntity::getApplicationId));
-
-				for (Map.Entry<String, List<WfStatusEntity>> wfStatusEntity : wfInfos.entrySet()) {
-					HashMap<String, Object> responseMap = new HashMap<>();
-					responseMap.put(Constants.WF_INFO, wfStatusEntity.getValue());
-					responseMap.put(Constants.USER_INFO, userInfoMap.get(wfStatusEntity.getKey()));
-					esUserProfiles.add(responseMap);
-				}
-				userProfiles = esUserProfiles.stream()
-					.sorted((profile1, profile2) -> {
-						Map<String, Object> userInfo1 = (Map<String, Object>) profile1.get(Constants.USER_INFO);
-						Map<String, Object> userInfo2 = (Map<String, Object>) profile2.get(Constants.USER_INFO);
-
-						float searchScore1 = (float) userInfo1.get(Constants.SEARCH_SCORE);
-						float searchScore2 = (float) userInfo2.get(Constants.SEARCH_SCORE);
-
-						return Float.compare(searchScore2, searchScore1);
-					})
-					.collect(Collectors.toList());
+				userProfiles = buildEsUserProfilesSortedBySearchScore(wfStatusEntities, userInfoMap);
 			} else {
 				userProfiles = CollectionUtils.isEmpty(wfStatusEntities) ?
 						Collections.emptyList() :
@@ -1524,6 +1426,56 @@ public class WorkflowServiceImpl implements Workflowservice {
 		return response;
 	}
 
+	private boolean isRootOrgRequiredButMissing(String rootOrgId, SearchCriteria criteria) {
+		return StringUtil.isBlank(rootOrgId) && criteria.getRequestType() != null
+				&& (criteria.getRequestType().contains(Constants.GROUP_CHANGE)
+						|| criteria.getRequestType().contains(Constants.DESIGNATION_CHANGE));
+	}
+
+	private Map.Entry<List<String>, Long> resolveApplicationIdsFromDb(SearchCriteria criteria, Pageable pageable) {
+		long totalResponseCount;
+		Page<String> applicationIdsPage;
+		if (criteria.getRequestType().contains(Constants.ORG_TRANSFER_REQUEST)) {
+			totalResponseCount = wfStatusRepo.getCountOfDistinctUserIdsUsingServiceAndRequestTypeAndStatus(
+					criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
+					criteria.getRequestType());
+			applicationIdsPage = wfStatusRepo.getListOfDistinctUserIdsUsingRequestType(
+					criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
+					criteria.getRequestType(), pageable);
+		} else {
+			totalResponseCount = wfStatusRepo.getCountOfDistinctUserIdForProfileApproval(
+					criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
+					criteria.getRequestType(), Constants.ORG_TRANSFER_REQUEST);
+			applicationIdsPage = wfStatusRepo.getListOfDistinctUserIdsUsingRequestTypeForProfileApproval(
+					criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(),
+					criteria.getRequestType(), Constants.ORG_TRANSFER_REQUEST, pageable);
+		}
+		return new AbstractMap.SimpleEntry<>(applicationIdsPage.getContent(), totalResponseCount);
+	}
+
+	private List<Map<String, Object>> buildEsUserProfilesSortedBySearchScore(List<WfStatusEntity> wfStatusEntities, Map<String, Object> userInfoMap) {
+		List<Map<String, Object>> esUserProfiles = new ArrayList<Map<String, Object>>();
+		Map<String, List<WfStatusEntity>> wfInfos = wfStatusEntities.stream()
+				.collect(Collectors.groupingBy(WfStatusEntity::getApplicationId));
+
+		for (Map.Entry<String, List<WfStatusEntity>> wfStatusEntity : wfInfos.entrySet()) {
+			HashMap<String, Object> responseMap = new HashMap<>();
+			responseMap.put(Constants.WF_INFO, wfStatusEntity.getValue());
+			responseMap.put(Constants.USER_INFO, userInfoMap.get(wfStatusEntity.getKey()));
+			esUserProfiles.add(responseMap);
+		}
+		return esUserProfiles.stream()
+				.sorted((profile1, profile2) -> {
+					Map<String, Object> userInfo1 = (Map<String, Object>) profile1.get(Constants.USER_INFO);
+					Map<String, Object> userInfo2 = (Map<String, Object>) profile2.get(Constants.USER_INFO);
+
+					float searchScore1 = (float) userInfo1.get(Constants.SEARCH_SCORE);
+					float searchScore2 = (float) userInfo2.get(Constants.SEARCH_SCORE);
+
+					return Float.compare(searchScore2, searchScore1);
+				})
+				.collect(Collectors.toList());
+	}
 
 	private void populateSheetWithPendingRequests(Map<String, Object> allPendingRequestMap, Map<String, Object> allUserDetails, String csvFilePath) throws IOException {
 		PrintWriter writer = new PrintWriter(new FileWriter(csvFilePath));
@@ -1619,7 +1571,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		return allUserDetails;
 	}
 
-	private ResponseEntity<?> preparePendingRequestFileResponse(String csvFilePath, int size) throws InterruptedException, IOException {
+	private ResponseEntity<Object> preparePendingRequestFileResponse(String csvFilePath, int size) throws InterruptedException, IOException {
 		HttpHeaders headers = new HttpHeaders();
 		headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + "pendingRequest.csv" + "\"");
 		headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
@@ -1628,20 +1580,20 @@ public class WorkflowServiceImpl implements Workflowservice {
 		File file = new File(csvFilePath);
 		Path filePath = Paths.get(String.format("%s/%s", Constants.LOCAL_BASE_PATH, "pendingRequest.csv"));
 		InputStreamResource fileStream = new InputStreamResource(new FileInputStream(file));
-		ResponseEntity<?> responseEntity =  ResponseEntity.ok()
+		ResponseEntity<Object> responseEntity =  ResponseEntity.ok()
 				.headers(headers)
 				.contentLength(Files.size(filePath))
-				.body(fileStream);
+				.<Object>body(fileStream);
 		Files.delete(filePath);
 		return responseEntity;
 	}
 
-	private ResponseEntity<?> getNoPendingRequestAvailableResponse(String message){
+	private ResponseEntity<Object> getNoPendingRequestAvailableResponse(String message){
 		HttpHeaders httpHeaders = new HttpHeaders();
 		httpHeaders.put(Constants.COUNT, Collections.singletonList(String.valueOf(0)));
 		InputStream inputStream = new ByteArrayInputStream(message.getBytes());
 		InputStreamResource inputStreamResource = new InputStreamResource(inputStream);
-		return ResponseEntity.status(HttpStatus.OK).headers(httpHeaders).body(inputStreamResource);
+		return ResponseEntity.status(HttpStatus.OK).headers(httpHeaders).<Object>body(inputStreamResource);
 	}
 	private List<Map<String, Object>> sortDataByCriteria(List<Map<String, Object>> data, SearchCriteria searchCriteria) {
 		if (searchCriteria.getSortBy() != null && !searchCriteria.getSortBy().isEmpty()) {
@@ -1655,7 +1607,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 					comparator = Comparator.comparing(entry -> (String) ((Map<String, Object>) entry.get("userInfo")).get("first_name"));
 					break;
 				case "createdOn":
-					comparator = Comparator.comparing(entry -> (Date) ((List<WfStatusEntity>) entry.get("wfInfo"))
+					comparator = Comparator.comparing(entry -> (Date) ((List<WfStatusEntity>) entry.get(Constants.WF_INFO))
 							.get(0).getCreatedOn());
 					break;
 				default:
@@ -1786,8 +1738,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 	private void sendNotification(String requestKey, String deptName, WfRequest wfRequest) {
 		switch (requestKey) {
-			case "group":
-			case "designation":
+			case "group", "designation":
 				sendProfileVerificationNotification(wfRequest, wfRequest.getRootOrgId());
 				break;
 			case "name":
@@ -1842,7 +1793,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	private List<String> callUserSearchApiToGetMdoleaderUserId(String doptName, String rootOrgId) {
 		StringBuilder url = new StringBuilder(configuration.getLmsServiceHost()).append(configuration.getLmsUserSearchEndPoint());
 		Map<String, Object> filters = new HashMap<>();
-		if (!StringUtils.isEmpty(rootOrgId)) {
+		if (StringUtils.hasLength(rootOrgId)) {
 			filters.put("rootOrgId", rootOrgId);
 		} else {
 			filters.put("rootOrgName", doptName);
@@ -1888,22 +1839,22 @@ public class WorkflowServiceImpl implements Workflowservice {
 				configuration.getUserProfileReadEndPoint().replace(Constants.USER_ID_VALUE, userId);
 		Object response = requestServiceImpl.fetchResultUsingGet(new StringBuilder(url));
 		if (response == null) {
-			return null;
+			return Collections.emptyMap();
 		}
 		Map<String, Object> readResponse = mapper.convertValue(response, Map.class);
 		Object resultObj = readResponse.get(Constants.RESULT);
 		if (!(resultObj instanceof Map)) {
-			return null;
+			return Collections.emptyMap();
 		}
 		Map<String, Object> resultMap = (Map<String, Object>) resultObj;
 		if (MapUtils.isEmpty(resultMap)) {
 			log.error("User profile read response is empty for userId: {}", userId);
-			return null;
+			return Collections.emptyMap();
 		}
 		Object userResponseObj = resultMap.get(Constants.RESPONSE);
 		if (!(userResponseObj instanceof Map)) {
 			log.error("User profile read response is empty for userId: {}", userId);
-			return null;
+			return Collections.emptyMap();
 		}
 		return (Map<String, Object>) userResponseObj;
 	}
@@ -1916,8 +1867,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 					pageable.getPageSize(),
 					Sort.by(Sort.Direction.DESC, "createdOn"));
 
-			boolean hasStatus = !StringUtils.isEmpty(criteria.getApplicationStatus());
-			boolean hasDept = !StringUtils.isEmpty(criteria.getDeptName());
+			boolean hasStatus = StringUtils.hasLength(criteria.getApplicationStatus());
+			boolean hasDept = StringUtils.hasLength(criteria.getDeptName());
 
 			Page<WfStatusEntity> wfStatusPage;
 
@@ -1969,8 +1920,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 					.enrichUserData(groupedEntities, null);
 
 			userProfiles.sort((a, b) -> {
-				List<WfStatusEntity> wfInfoA = (List<WfStatusEntity>) a.get("wfInfo");
-				List<WfStatusEntity> wfInfoB = (List<WfStatusEntity>) b.get("wfInfo");
+				List<WfStatusEntity> wfInfoA = (List<WfStatusEntity>) a.get(Constants.WF_INFO);
+				List<WfStatusEntity> wfInfoB = (List<WfStatusEntity>) b.get(Constants.WF_INFO);
 
 				long latestA = wfInfoA.stream()
 						.map(WfStatusEntity::getCreatedOn)

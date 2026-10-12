@@ -2,8 +2,8 @@ package org.sunbird.workflow.controller;
 
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,12 +27,14 @@ import org.sunbird.workflow.service.Workflowservice;
 @RestController
 @RequestMapping("/v1/workflow")
 public class WorkFlowController {
-	@Autowired
-	@Qualifier("workflowServiceImpl")
-	private Workflowservice workflowService;
+	private final Workflowservice workflowService;
+	private final AiAssessmentServiceImpl aiAssessmentServiceImpl;
 
-	@Autowired
-	private AiAssessmentServiceImpl aiAssessmentServiceImpl;
+	public WorkFlowController(@Qualifier("workflowServiceImpl") Workflowservice workflowService,
+			AiAssessmentServiceImpl aiAssessmentServiceImpl) {
+		this.workflowService = workflowService;
+		this.aiAssessmentServiceImpl = aiAssessmentServiceImpl;
+	}
 
 	@PostMapping("/transition")
 	public ResponseEntity<Response> wfTransition(@RequestHeader String rootOrg, @RequestHeader String org,
@@ -124,7 +126,7 @@ public class WorkFlowController {
 	}
 
 	@GetMapping(path = "/admin/bulkbuplodfile/download/{fileName}")
-	public ResponseEntity<?> downloadBulkuplodFile(@PathVariable("fileName") String fileName) {
+	public ResponseEntity<InputStreamResource> downloadBulkuplodFile(@PathVariable("fileName") String fileName) {
 		return workflowService.downloadBulkUploadFile(fileName);
 	}
 
@@ -137,7 +139,7 @@ public class WorkFlowController {
 
 
 	@GetMapping(path = "/admin/pendingRequest/download")
-	public ResponseEntity<?> downloadPendingRequestFile(@RequestHeader(Constants.X_AUTH_TOKEN) String userAuthToken) {
+	public ResponseEntity<Object> downloadPendingRequestFile(@RequestHeader(Constants.X_AUTH_TOKEN) String userAuthToken) {
 		return workflowService.downloadPendingRequestFile(userAuthToken);
 	}
 

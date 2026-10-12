@@ -19,6 +19,9 @@ import org.sunbird.workflow.models.SunbirdApiRespParam;
  */
 public class ProjectUtil {
 
+	private ProjectUtil() {
+	}
+
 	static Logger logger = LogManager.getLogger(ProjectUtil.class);
 
 	public static PropertiesCache propertiesCache;
@@ -46,13 +49,13 @@ public class ProjectUtil {
 	}
 
 	public static boolean isValidEmail(String email) {
-		String emailRegex = "^[a-zA-Z0-9_+&*-]+(?:\\." + "[a-zA-Z0-9_+&*-]+)*@" + "(?:[a-zA-Z0-9-]+\\.)+[a-z"
+		String emailRegex = "^[a-zA-Z0-9_+&*-]++(?:\\." + "[a-zA-Z0-9_+&*-]++)*+@" + "(?:[a-zA-Z0-9-]++\\.)++[a-z"
 				+ "A-Z]{2,7}$";
 		Pattern pat = Pattern.compile(emailRegex);
 		return pat.matcher(email).matches();
 	}
 
-	public static Boolean isValidMobileNumber(String mobileNumber) {
+	public static boolean isValidMobileNumber(String mobileNumber) {
 		String contactNumberRegex = "^\\d{10}$";
 		Pattern pat = Pattern.compile(contactNumberRegex);
 		return pat.matcher(mobileNumber).matches();

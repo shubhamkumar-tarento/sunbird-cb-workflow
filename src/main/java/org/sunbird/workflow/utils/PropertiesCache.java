@@ -15,7 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class PropertiesCache {
 
-    private static PropertiesCache propertiesCache = null;
     public final Map<String, Float> attributePercentageMap = new ConcurrentHashMap<>();
     private final String[] fileName = {
             "cassandra.config.properties",
@@ -37,18 +36,12 @@ public class PropertiesCache {
         }
     }
 
+    private static class InstanceHolder {
+        private static final PropertiesCache INSTANCE = new PropertiesCache();
+    }
+
     public static PropertiesCache getInstance() {
-
-        // change the lazy holder implementation to simple singleton implementation ...
-        if (null == propertiesCache) {
-            synchronized (PropertiesCache.class) {
-                if (null == propertiesCache) {
-                    propertiesCache = new PropertiesCache();
-                }
-            }
-        }
-
-        return propertiesCache;
+        return InstanceHolder.INSTANCE;
     }
 
     public void saveConfigProperty(String key, String value) {

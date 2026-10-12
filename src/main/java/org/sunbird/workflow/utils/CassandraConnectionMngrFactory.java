@@ -1,17 +1,15 @@
 package org.sunbird.workflow.utils;
 
-public class CassandraConnectionMngrFactory {
+public final class CassandraConnectionMngrFactory {
 
-    private static CassandraConnectionManager instance;
+    private CassandraConnectionMngrFactory() {
+    }
+
+    private static class InstanceHolder {
+        private static final CassandraConnectionManager INSTANCE = new CassandraConnectionManagerImpl();
+    }
 
     public static CassandraConnectionManager getInstance() {
-        if (instance == null) {
-            synchronized (CassandraConnectionMngrFactory.class) {
-                if (instance == null) {
-                    instance = new CassandraConnectionManagerImpl();
-                }
-            }
-        }
-        return instance;
+        return InstanceHolder.INSTANCE;
     }
 }

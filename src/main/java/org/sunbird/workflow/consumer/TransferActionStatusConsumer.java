@@ -6,10 +6,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
-import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
 import org.sunbird.workflow.utils.CassandraOperation;
@@ -18,19 +16,17 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
+import lombok.RequiredArgsConstructor;
+
 @Service
+@RequiredArgsConstructor
 public class TransferActionStatusConsumer {
 
     private static final Logger logger = LogManager.getLogger(TransferActionStatusConsumer.class);
 
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    private CassandraOperation cassandraOperation;
+    private final ObjectMapper mapper;
+    private final WfStatusRepo wfStatusRepo;
+    private final CassandraOperation cassandraOperation;
 
     @KafkaListener(topics = "${kafka.topic.transfer.request.status.change}", groupId = "transfer-status-consumer-group")
     public void processStatusChange(ConsumerRecord<String, String> data) {

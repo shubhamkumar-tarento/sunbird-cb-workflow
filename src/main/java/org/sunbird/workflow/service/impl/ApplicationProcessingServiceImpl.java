@@ -3,9 +3,9 @@ package org.sunbird.workflow.service.impl;
 import java.util.HashMap;
 import java.util.Map;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
@@ -20,34 +20,23 @@ import org.sunbird.workflow.service.UserProfileWfService;
 import org.sunbird.workflow.service.UserRegistrationWfService;
 
 @Service
+@RequiredArgsConstructor
 public class ApplicationProcessingServiceImpl {
 
-	@Autowired
-	private UserProfileWfService userProfileWfService;
-
-	@Autowired
-	private Configuration configuration;
-	@Autowired
-	private RequestServiceImpl requestService;
-	@Autowired
-	private WfStatusRepo wfStatusRepo;
-
-	@Autowired
-	private UserRegistrationWfService userRegService;
-
-	@Autowired
-	private BPWorkFlowService bpWorkFlowService;
-
-	@Autowired
-	private DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
+	private final UserProfileWfService userProfileWfService;
+	private final Configuration configuration;
+	private final RequestServiceImpl requestService;
+	private final WfStatusRepo wfStatusRepo;
+	private final UserRegistrationWfService userRegService;
+	private final BPWorkFlowService bpWorkFlowService;
+	private final DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
 
 	Logger logger = LogManager.getLogger(ApplicationProcessingServiceImpl.class);
 
 	public void processWfApplicationRequest(WfRequest wfRequest) {
 		switch (wfRequest.getServiceName()) {
 			// Or condition in case statement
-			case Constants.PROFILE_SERVICE_NAME:
-			case Constants.USER_PROFILE_FLAG_SERVICE:
+			case Constants.PROFILE_SERVICE_NAME, Constants.USER_PROFILE_FLAG_SERVICE:
 				userProfileWfService.updateUserProfile(wfRequest);
 				break;
 			case Constants.USER_REGISTRATION_SERVICE_NAME:
@@ -55,11 +44,8 @@ public class ApplicationProcessingServiceImpl {
 				break;
 			case Constants.DOMAIN:
 				domainWhiteListWorkFlowService.processDomainRequest(wfRequest);
-			case Constants.BLENDED_PROGRAM_SERVICE_NAME:
-			case Constants.ONE_STEP_MDO_APPROVAL:
-			case Constants.ONE_STEP_PC_APPROVAL:
-			case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-			case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+				break;
+			case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
 				bpWorkFlowService.processWFRequest(wfRequest);
 				break;
 			default:

@@ -71,35 +71,6 @@ public class CassandraOperationImpl implements CassandraOperation {
         return count;
     }
 
-    /*private Select processQuery(String keyspaceName, String tableName, Map<String, Object> propertyMap, List<String> fields) {
-        Select selectFrom;
-        if (CollectionUtils.isNotEmpty(fields)) {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).columns(fields.toArray(new String[0]));
-        } else {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).all();
-        }
-
-        Select selectQuery = selectFrom.all();
-        if (MapUtils.isNotEmpty(propertyMap)) {
-            for (Entry<String, Object> entry : propertyMap.entrySet()) {
-                if (entry.getValue() instanceof List) {
-                    List<?> list = (List<?>) entry.getValue();
-                    if (CollectionUtils.isNotEmpty(list)) {
-                        List<Term> terms = list.stream()
-                                .map(QueryBuilder::literal)
-                                .collect(Collectors.toList());
-                        selectQuery = selectQuery.whereColumn(entry.getKey()).in(terms);
-                    }
-                } else {
-                    selectQuery = selectQuery.whereColumn(entry.getKey()).isEqualTo(QueryBuilder.literal(entry.getValue()));
-                }
-            }
-            selectQuery = selectQuery.allowFiltering();
-        }
-
-        return selectQuery;
-    }
-*/
     private Select processQuery(String keyspaceName, String tableName, Map<String, Object> propertyMap,
                                 List<String> fields) {
 

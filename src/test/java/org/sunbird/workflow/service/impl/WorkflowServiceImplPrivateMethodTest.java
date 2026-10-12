@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -218,88 +217,6 @@ class WorkflowServiceImplPrivateMethodTest {
 
 
     @Test
-    void testGetNextApplicableActions_emptyList() throws Exception {
-        when(mapper.writeValueAsString(null)).thenReturn("[]");
-
-        String result = ReflectionTestUtils.invokeMethod(
-                workflowService,
-                "getNextApplicableActions",
-                (Object) null
-        );
-
-        assertEquals("[]", result);
-        verify(mapper).writeValueAsString(null);
-    }
-
-    @Test
-    void testGetNextApplicableActions_withActions() throws Exception {
-        List<WfAction> actions = new ArrayList<>();
-        WfAction action = new WfAction();
-        action.setAction("APPROVE");
-        action.setRoles(List.of("role1", "role2"));
-        actions.add(action);
-
-        when(mapper.writeValueAsString(any())).thenReturn("[{\"action\":\"APPROVE\",\"roles\":[\"role1\",\"role2\"]}]");
-
-        String result = ReflectionTestUtils.invokeMethod(
-                workflowService,
-                "getNextApplicableActions",
-                actions
-        );
-
-        assertNotNull(result);
-        assertTrue(result.contains("APPROVE"));
-        verify(mapper).writeValueAsString(any());
-    }
-
-    @Test
-    void testValidateRoles_bothListsEmpty() {
-        assertDoesNotThrow(() ->
-                ReflectionTestUtils.invokeMethod(workflowService, "validateRoles", null, null)
-        );
-
-        assertDoesNotThrow(() ->
-                ReflectionTestUtils.invokeMethod(workflowService, "validateRoles", List.of(), List.of())
-        );
-
-        assertDoesNotThrow(() ->
-                ReflectionTestUtils.invokeMethod(workflowService, "validateRoles", List.of(""), List.of())
-        );
-    }
-
-    @Test
-    void testValidateRoles_actorRolesEmpty_throwsApplicationException() {
-        List<String> actorRoles = List.of();
-        List<String> allowedRoles = List.of("role1");
-
-        Executable executable = () -> ReflectionTestUtils.invokeMethod(workflowService, "validateRoles", actorRoles, allowedRoles);
-
-        ApplicationException ex = assertThrows(ApplicationException.class, executable);
-        assertEquals(Constants.WORKFLOW_ROLE_ERROR, ex.getMessage());
-    }
-
-
-    @Test
-    void testValidateRoles_rolesDoNotMatch_throwsBadRequestException() {
-        List<String> actors = List.of("actor1");
-        List<String> roles = List.of("role1", "role2");
-
-        Executable executable = () -> ReflectionTestUtils.invokeMethod(workflowService, "validateRoles", actors, roles);
-
-        BadRequestException ex = assertThrows(BadRequestException.class, executable);
-        assertEquals(Constants.WORKFLOW_ROLE_CHECK_ERROR, ex.getMessage());
-    }
-
-
-    @Test
-    void testValidateRoles_rolesMatch_ok() {
-        assertDoesNotThrow(() ->
-                ReflectionTestUtils.invokeMethod(workflowService, "validateRoles",
-                        List.of("role1", "actor2"), List.of("role1", "role2"))
-        );
-    }
-
-    @Test
     void testGetWfAction_whenActionsIsNull_shouldThrow() {
         WfStatus wfStatus = new WfStatus();
         wfStatus.setActions(null);
@@ -448,81 +365,6 @@ class WorkflowServiceImplPrivateMethodTest {
         assertDoesNotThrow(() ->
                 ReflectionTestUtils.invokeMethod(workflowService, "validateWfRequest", wfRequest)
         );
-    }
-
-    @Test
-    void testGetUserRoles_bothRolesPresent() {
-        String userId = "user123";
-
-        when(configuration.getLexCoreServiceHost()).thenReturn("http://lex/");
-        when(configuration.getUserRoleSearchEndpoint()).thenReturn("/roles/{user_id}");
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("default_roles", List.of("default1", "default2"));
-        response.put("user_roles", List.of("role1", "role2"));
-
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(response);
-
-        List<String> result = ReflectionTestUtils.invokeMethod(workflowService, "getUserRoles", userId);
-
-        assertEquals(4, result.size());
-        assertEquals(Set.of("default1", "default2", "role1", "role2"), new HashSet<>(result));
-    }
-
-    @Test
-    void testGetUserRoles_onlyDefaultRoles() {
-        String userId = "user123";
-
-        when(configuration.getLexCoreServiceHost()).thenReturn("http://lex/");
-        when(configuration.getUserRoleSearchEndpoint()).thenReturn("/roles/{user_id}");
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("default_roles", List.of("default1"));
-        response.put("user_roles", null);
-
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(response);
-
-        List<String> result = ReflectionTestUtils.invokeMethod(workflowService, "getUserRoles", userId);
-
-        assertEquals(1, result.size());
-        assertEquals(List.of("default1"), result);
-    }
-
-    @Test
-    void testGetUserRoles_onlyUserRoles() {
-        String userId = "user123";
-
-        when(configuration.getLexCoreServiceHost()).thenReturn("http://lex/");
-        when(configuration.getUserRoleSearchEndpoint()).thenReturn("/roles/{user_id}");
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("default_roles", null);
-        response.put("user_roles", List.of("role1"));
-
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(response);
-
-        List<String> result = ReflectionTestUtils.invokeMethod(workflowService, "getUserRoles", userId);
-
-        assertEquals(1, result.size());
-        assertEquals(List.of("role1"), result);
-    }
-
-    @Test
-    void testGetUserRoles_bothEmpty() {
-        String userId = "user123";
-
-        when(configuration.getLexCoreServiceHost()).thenReturn("http://lex/");
-        when(configuration.getUserRoleSearchEndpoint()).thenReturn("/roles/{user_id}");
-
-        Map<String, Object> response = new HashMap<>();
-        response.put("default_roles", null);
-        response.put("user_roles", null);
-
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(response);
-
-        List<String> result = ReflectionTestUtils.invokeMethod(workflowService, "getUserRoles", userId);
-
-        assertEquals(0, result.size());
     }
 
     @Test
@@ -1029,7 +871,7 @@ void testHandleProfileServiceWorkflow_requestExists() {
         Object result = ReflectionTestUtils.invokeMethod(workflowService,
                 "userProfileRead", "user1");
 
-        assertNull(result);
+        assertEquals(Collections.emptyMap(), result);
     }
 
     private WfRequest buildValidRequest() {

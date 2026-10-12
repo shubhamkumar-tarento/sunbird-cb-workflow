@@ -1,6 +1,5 @@
 package org.sunbird.workflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,12 +17,14 @@ import java.util.Map;
 @RequestMapping("/v2/workflow")
 public class WorkFlowControllerV2 {
 
-    @Autowired
-    @Qualifier("workflowServiceImpl")
-    private Workflowservice workflowService;
+    private final Workflowservice workflowService;
+    private final WorkFlowServiceV2 workFlowServiceV2;
 
-    @Autowired
-    private WorkFlowServiceV2 workFlowServiceV2;
+    public WorkFlowControllerV2(@Qualifier("workflowServiceImpl") Workflowservice workflowService,
+            WorkFlowServiceV2 workFlowServiceV2) {
+        this.workflowService = workflowService;
+        this.workFlowServiceV2 = workFlowServiceV2;
+    }
 
     @PostMapping(path = "/getUserWFApplicationFields", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Response> getUserWFApplicationFieldsV2(@RequestHeader String rootOrg, @RequestHeader String org,

@@ -6,7 +6,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
@@ -22,27 +21,27 @@ public class ApplicationProcessingConsumer {
 
     Logger logger = LogManager.getLogger(ApplicationProcessingConsumer.class);
 
-    @Autowired
-    private ObjectMapper mapper;
+    private final ObjectMapper mapper;
+    private final ApplicationProcessingServiceImpl applicationProcessingServiceImpl;
+    private final WorkflowAuditProcessingServiceImpl workflowAuditProcessingService;
+    private final WorkflowESSyncServiceImpl workflowESSyncServiceImpl;
 
-    @Autowired
-    @Lazy
-    private ApplicationProcessingServiceImpl applicationProcessingServiceImpl;
-
-    @Autowired
-    private WorkflowAuditProcessingServiceImpl workflowAuditProcessingService;
-
-    @Autowired
-    private WorkflowESSyncServiceImpl workflowESSyncServiceImpl;
+    public ApplicationProcessingConsumer(ObjectMapper mapper,
+            @Lazy ApplicationProcessingServiceImpl applicationProcessingServiceImpl,
+            WorkflowAuditProcessingServiceImpl workflowAuditProcessingService,
+            WorkflowESSyncServiceImpl workflowESSyncServiceImpl) {
+        this.mapper = mapper;
+        this.applicationProcessingServiceImpl = applicationProcessingServiceImpl;
+        this.workflowAuditProcessingService = workflowAuditProcessingService;
+        this.workflowESSyncServiceImpl = workflowESSyncServiceImpl;
+    }
 
 
     @KafkaListener(groupId = "workflowContentTopic-consumer", topics = "${kafka.topics.workflow.request}")
     public void processMessage(ConsumerRecord<String, String> data) {
         try {
             if (StringUtils.isNoneBlank(data.value())) {
-                CompletableFuture.runAsync(() -> {
-                    processApplicationMessage(data.value());
-                });
+                CompletableFuture.runAsync(() -> processApplicationMessage(data.value()));
             } else {
                 logger.error("Error in Application Consumer: Invalid Kafka Msg");
             }

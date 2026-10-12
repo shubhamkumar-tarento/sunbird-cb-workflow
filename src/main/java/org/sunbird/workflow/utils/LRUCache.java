@@ -1,6 +1,5 @@
 package org.sunbird.workflow.utils;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.sunbird.workflow.config.Configuration;
 
@@ -12,20 +11,20 @@ import java.util.Map;
 @Component
 public class LRUCache<K, V> extends LinkedHashMap<K, V> {
 
-    @Autowired
-    Configuration conf;
+    private final transient Configuration conf;
     private  int maxSize;
     private  long maxAgeInMillis;
-    private  Map<K, Long> entryTimeMap;
+    private  transient Map<K, Long> entryTimeMap;
 
-    public LRUCache() {
+    public LRUCache(Configuration conf) {
         super(16, 0.75f, true);
+        this.conf = conf;
     }
 
     @PostConstruct
     public void postConstruct() {
         this.maxSize = conf.getEnrolStatusCountLocalCacheSize();
-        this.maxAgeInMillis = conf.getEnrolStatusCountLocalTimeToLive()*60;
+        this.maxAgeInMillis = (long) conf.getEnrolStatusCountLocalTimeToLive() * 60;
         this.entryTimeMap = new HashMap<>();
     }
     @Override

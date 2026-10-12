@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.keycloak.common.util.Time;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.sunbird.workflow.config.Constants;
 
@@ -16,15 +16,15 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@RequiredArgsConstructor
 public class AccessTokenValidator {
 
-    @Autowired
-    KeyManager keyManager;
+    private final KeyManager keyManager;
     private static Logger logger = LoggerFactory.getLogger(AccessTokenValidator.class.getName());
     private static ObjectMapper mapper = new ObjectMapper();
     private static PropertiesCache cache = PropertiesCache.getInstance();
 
-    private Map<String, Object> validateToken(String token) throws Exception {
+    private Map<String, Object> validateToken(String token) {
         try {
             String[] tokenElements = token.split("\\.");
             String header = tokenElements[0];
@@ -57,7 +57,7 @@ public class AccessTokenValidator {
 
 
     public String verifyUserToken(String token) {
-        String userId = Constants._UNAUTHORIZED;
+        String userId = Constants.UNAUTHORIZED_USER_ID;
         try {
             Map<String, Object> payload = validateToken(token);
             if (MapUtils.isNotEmpty(payload) && checkIss((String) payload.get("iss"))) {
@@ -93,7 +93,7 @@ public class AccessTokenValidator {
         if (accessToken != null) {
             try {
                 clientAccessTokenId = verifyUserToken(accessToken);
-                if (Constants._UNAUTHORIZED.equalsIgnoreCase(clientAccessTokenId)) {
+                if (Constants.UNAUTHORIZED_USER_ID.equalsIgnoreCase(clientAccessTokenId)) {
                     clientAccessTokenId = null;
                 }
             } catch (Exception ex) {

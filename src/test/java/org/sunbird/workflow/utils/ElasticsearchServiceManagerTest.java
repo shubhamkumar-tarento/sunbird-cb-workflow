@@ -324,7 +324,7 @@ class ElasticsearchServiceManagerTest {
         Map<String, Object> result =
                 service.readEntity("user", "_doc", "123");
 
-        assertNull(result);
+        assertTrue(result.isEmpty());
     }
 
     @Test
@@ -336,6 +336,6 @@ class ElasticsearchServiceManagerTest {
         Map<String, Object> result =
                 service.readEntity("user", "_doc", "123");
 
-        assertNull(result);
+        assertTrue(result.isEmpty());
     }
 }

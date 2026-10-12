@@ -9,8 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.commons.collections.MapUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jetbrains.annotations.NotNull;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -33,41 +32,24 @@ import org.sunbird.workflow.utils.NotificationTriggerService;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
 
     Logger logger = LogManager.getLogger(WorkFlowServiceImplV2.class);
 
-    @Autowired
-    private WfStatusRepo wfStatusRepo;
-
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    private CassandraOperation cassandraOperation;
-
-    @Autowired
-    private Configuration configuration;
-
-    @Autowired
-    private RequestServiceImpl requestServiceImpl;
-
-    @Autowired
-    private Producer producer;
-
-    @Autowired
-    private RedisCacheMgr redisCacheMgr;
-
-    @Autowired
-    private NotificationTriggerService notificationTriggerService;
-
-    @Autowired
-    private AccessTokenValidator accessTokenValidator;
+    private final WfStatusRepo wfStatusRepo;
+    private final ObjectMapper mapper;
+    private final CassandraOperation cassandraOperation;
+    private final Configuration configuration;
+    private final RequestServiceImpl requestServiceImpl;
+    private final Producer producer;
+    private final RedisCacheMgr redisCacheMgr;
+    private final NotificationTriggerService notificationTriggerService;
+    private final AccessTokenValidator accessTokenValidator;
 
     @Override
     public Response workflowTransition(String rootOrg, String org, Map<String, Object> requestBody, String userToken) {
@@ -78,7 +60,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
             String modifiedBy = "";
             String role = "";
             String requestUserid = accessTokenValidator.fetchUserIdFromAccessToken(userToken);
-            if(StringUtils.isEmpty(requestUserid)){
+            if(!StringUtils.hasLength(requestUserid)){
                 response.setResponseCode(HttpStatus.UNAUTHORIZED);
                 return response;
             }
@@ -99,47 +81,10 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
                         .findFirst()
                         .orElse(null);
 
-                if (!StringUtils.isEmpty(serviceName)) {
-                    for (String userId : wfRequestsGroupedByUserId.keySet()) {
-                        logger.info("Processing workflow requests for userId: {}", userId);
-
-                        List<Object> wfRequestsForEvent = new ArrayList<>();
-                        for (WfRequest wfRequest : wfRequestsGroupedByUserId.get(userId)) {
-                            logger.debug("Processing workflow request with wfId: {}", wfRequest.getWfId());
-                            Map<String, Object> responseData = new HashMap<>();
-                            try {
-                                if (!StringUtils.isEmpty(wfRequest.getServiceName())) {
-                                    if (StringUtils.isEmpty(wfRequest.getWfId()) &&
-                                            wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)) {
-
-                                        if (handleProfileServiceWorkflow(wfRequest, responseData)) {
-                                            logger.warn("Same Profile approval request is already in workflow for request ID: {}", wfRequest.getWfId());
-                                            break;
-                                        }
-                                    }
-                                    Map<String, String> changeStatusResponse = changeStatus(rootOrg, org, wfRequest, modifiedBy, role, userToken);
-                                    String changedStatus = changeStatusResponse.get(Constants.STATUS);
-                                    logger.info("Changed status to '{}' for workflow ID: {}", changedStatus, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
-
-                                    responseData.put(Constants.STATUS, changedStatus);
-                                    responseData.put(Constants.WF_ID_CONSTANT, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
-                                }
-                                wfRequestsForEvent.add(wfRequest);
-
-                                logger.info("sending notification request from here v2:{}",wfRequest);
-
-                            } catch (Exception e) {
-                                logger.error("Error processing workflow request ID: {}", wfRequest.getWfId(), e);
-                                responseData.put(Constants.STATUS, Constants.FAILED);
-                                responseData.put(Constants.ERROR_MESSAGE, e.getMessage());
-                                responseData.put(Constants.WF_ID_CONSTANT, !StringUtils.isEmpty(wfRequest.getWfId()) ? wfRequest.getWfId() : "");
-                            }
-                            data.add(responseData);
-                        }
-                        if (!CollectionUtils.isEmpty(wfRequestsForEvent)) {
-                            pushWorkflowEvents(serviceName, userId, wfRequestsForEvent, userToken);
-                        }
-                        logger.info("Completed workflowTransition successfully for userId: {}", userId);
+                if (StringUtils.hasLength(serviceName)) {
+                    for (Map.Entry<String, List<WfRequest>> entry : wfRequestsGroupedByUserId.entrySet()) {
+                        processWfRequestsForUser(rootOrg, org, entry.getKey(), entry.getValue(),
+                                modifiedBy, role, userToken, serviceName, data);
                     }
                     handlePostWorkflowNotification(wfRequestList.get(0));
                     response.put(Constants.MESSAGE, Constants.SUCCESS);
@@ -156,6 +101,55 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
             handleProcessingError(data, response);
         }
         return response;
+    }
+
+    private void processWfRequestsForUser(String rootOrg, String org, String userId, List<WfRequest> wfRequests,
+            String modifiedBy, String role, String userToken, String serviceName, List<Object> data) {
+        logger.info("Processing workflow requests for userId: {}", userId);
+
+        List<Object> wfRequestsForEvent = new ArrayList<>();
+        for (WfRequest wfRequest : wfRequests) {
+            logger.debug("Processing workflow request with wfId: {}", wfRequest.getWfId());
+            if (processSingleWfRequestForEvent(rootOrg, org, wfRequest, modifiedBy, role, userToken, wfRequestsForEvent, data)) {
+                break;
+            }
+        }
+        if (!CollectionUtils.isEmpty(wfRequestsForEvent)) {
+            pushWorkflowEvents(serviceName, userId, wfRequestsForEvent, userToken);
+        }
+        logger.info("Completed workflowTransition successfully for userId: {}", userId);
+    }
+
+    private boolean processSingleWfRequestForEvent(String rootOrg, String org, WfRequest wfRequest, String modifiedBy,
+            String role, String userToken, List<Object> wfRequestsForEvent, List<Object> data) {
+        Map<String, Object> responseData = new HashMap<>();
+        try {
+            if (StringUtils.hasLength(wfRequest.getServiceName())) {
+                if (!StringUtils.hasLength(wfRequest.getWfId()) &&
+                        wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME) &&
+                        handleProfileServiceWorkflow(wfRequest, responseData)) {
+                    logger.warn("Same Profile approval request is already in workflow for request ID: {}", wfRequest.getWfId());
+                    return true;
+                }
+                Map<String, String> changeStatusResponse = changeStatus(rootOrg, org, wfRequest, modifiedBy, role, userToken);
+                String changedStatus = changeStatusResponse.get(Constants.STATUS);
+                logger.info("Changed status to '{}' for workflow ID: {}", changedStatus, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
+
+                responseData.put(Constants.STATUS, changedStatus);
+                responseData.put(Constants.WF_ID_CONSTANT, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
+            }
+            wfRequestsForEvent.add(wfRequest);
+
+            logger.info("sending notification request from here v2:{}", wfRequest);
+
+        } catch (Exception e) {
+            logger.error("Error processing workflow request ID: {}", wfRequest.getWfId(), e);
+            responseData.put(Constants.STATUS, Constants.FAILED);
+            responseData.put(Constants.ERROR_MESSAGE, e.getMessage());
+            responseData.put(Constants.WF_ID_CONSTANT, StringUtils.hasLength(wfRequest.getWfId()) ? wfRequest.getWfId() : "");
+        }
+        data.add(responseData);
+        return false;
     }
 
     private void handlePostWorkflowNotification(WfRequest wfRequest) {
@@ -186,8 +180,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
         String requestKey = toValueMap.keySet().iterator().next();
 
         switch (requestKey) {
-            case Constants.GROUP:
-            case Constants.DESIGNATION:
+            case Constants.GROUP, Constants.DESIGNATION:
                 sendProfileUpdateNotification(wfRequest);
                 break;
             case Constants.NAME:
@@ -267,7 +260,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
         } catch (IOException e) {
             String errorMessage = String.format("Error while validating WF request for user: %s. Exception message: %s", wfRequest.getUserId(), e.getMessage());
             logger.error(errorMessage, e);
-            throw new RuntimeException(errorMessage);
+            throw new ApplicationException(errorMessage, e);
         }
         return false;
     }
@@ -376,7 +369,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
     private String resolveServiceName(WfRequest wfRequest, WfStatusEntity applicationStatus) {
         if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName())
-                && applicationStatus != null && !StringUtils.isEmpty(applicationStatus.getServiceName())) {
+                && applicationStatus != null && StringUtils.hasLength(applicationStatus.getServiceName())) {
             return applicationStatus.getServiceName();
         }
         return wfRequest.getServiceName();
@@ -414,71 +407,81 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
         String userId = savedEntity.getUserId();
 
         if (Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(applicationStatus.getRequestType()) && nextWfStatus.getIsLastState()) {
-            logger.info("Auto {} Group-Designation post Transfer Approval for userId: {}", nextState, applicationStatus.getUserId());
+            autoCompleteGroupDesignationAfterTransfer(applicationStatus, wfRequest, nextState, inWorkflow, currentTime, userId, userToken);
+        }
+    }
 
-            List<WfStatusEntity> wfStatusEntities = wfStatusRepo.findByUserIdAndCurrentStatus(userId, Constants.SEND_FOR_APPROVAL, Boolean.TRUE);
-            if (CollectionUtils.isEmpty(wfStatusEntities)) {
-                logger.warn("No pending Group-Designation request found for userId: {}",
-                        savedEntity.getUserId());
+    private void autoCompleteGroupDesignationAfterTransfer(WfStatusEntity applicationStatus, WfRequest wfRequest,
+            String nextState, boolean inWorkflow, Date currentTime, String userId, String userToken) {
+        logger.info("Auto {} Group-Designation post Transfer Approval for userId: {}", nextState, applicationStatus.getUserId());
+
+        List<WfStatusEntity> wfStatusEntities = wfStatusRepo.findByUserIdAndCurrentStatus(userId, Constants.SEND_FOR_APPROVAL, Boolean.TRUE);
+        if (CollectionUtils.isEmpty(wfStatusEntities)) {
+            logger.warn("No pending Group-Designation request found for userId: {}",
+                    applicationStatus.getUserId());
+            return;
+        }
+
+        List<WfStatusEntity> validEntities = new ArrayList<>();
+        List<Object> wfRequestsForEvent = new ArrayList<>();
+        for (WfStatusEntity wfStatusEntity : wfStatusEntities) {
+            buildValidGroupDesignationEntity(wfStatusEntity, wfRequest, nextState, inWorkflow, currentTime, validEntities, wfRequestsForEvent);
+        }
+
+        // Save only valid entities
+        if (!CollectionUtils.isEmpty(validEntities)) {
+            wfStatusRepo.saveAll(validEntities);
+        } else {
+            logger.warn("No valid workflow entities to save for userId: {}", userId);
+        }
+
+        // Push workflow events
+        if (!CollectionUtils.isEmpty(wfRequestsForEvent)) {
+            try {
+                pushWorkflowEvents(Constants.PROFILE_SERVICE_NAME, userId, wfRequestsForEvent, userToken);
+                logger.info("Pushed {} workflow events for userId: {}", wfRequestsForEvent.size(), userId);
+            } catch (Exception e) {
+                logger.error("Failed to push workflow events for userId: {}, error={}", userId, e.getMessage(), e);
+            }
+        } else {
+            logger.warn("No valid workflow requests for userId: {}", userId);
+        }
+    }
+
+    private void buildValidGroupDesignationEntity(WfStatusEntity wfStatusEntity, WfRequest wfRequest, String nextState,
+            boolean inWorkflow, Date currentTime, List<WfStatusEntity> validEntities, List<Object> wfRequestsForEvent) {
+        try {
+            String fieldValues = wfStatusEntity.getUpdateFieldValues();
+            if (!StringUtils.hasText(fieldValues)) {
+                logger.warn("Empty updateFieldValues | wfId={}, userId={}", wfStatusEntity.getWfId(), wfStatusEntity.getUserId());
                 return;
             }
 
-            List<WfStatusEntity> validEntities = new ArrayList<>();
-            List<Object> wfRequestsForEvent = new ArrayList<>();
-            for (WfStatusEntity wfStatusEntity : wfStatusEntities) {
-                try {
-                    String fieldValues = wfStatusEntity.getUpdateFieldValues();
-                    if (StringUtils.isEmpty(fieldValues.trim().isEmpty())) {
-                        logger.warn("Empty updateFieldValues | wfId={}, userId={}", wfStatusEntity.getWfId(), wfStatusEntity.getUserId());
-                        continue;
-                    }
+            List<HashMap<String, Object>> updateFieldValues = mapper.readValue(fieldValues, new TypeReference<List<HashMap<String, Object>>>() {});
 
-                    List<HashMap<String, Object>> updateFieldValues = mapper.readValue(fieldValues, new TypeReference<List<HashMap<String, Object>>>() {});
+            // Build workflow request object
+            WfRequest wfRequestGD = new WfRequest();
+            wfRequestGD.setWfId(wfStatusEntity.getWfId());
+            wfRequestGD.setUserId(wfStatusEntity.getUserId());
+            wfRequestGD.setApplicationId(wfStatusEntity.getApplicationId());
+            wfRequestGD.setActorUserId(wfStatusEntity.getActorUUID());
+            wfRequestGD.setComment(wfRequest.getComment());
+            wfRequestGD.setServiceName(wfStatusEntity.getServiceName());
+            wfRequestGD.setRequestType(wfStatusEntity.getRequestType());
+            wfRequestGD.setDeptName(wfStatusEntity.getDeptName());
+            wfRequestGD.setState(wfStatusEntity.getCurrentStatus());
+            wfRequestGD.setAction(wfRequest.getAction());
+            wfRequestGD.setUpdateFieldValues(updateFieldValues);
+            wfRequestsForEvent.add(wfRequestGD);
 
-                    // Build workflow request object
-                    WfRequest wfRequestGD = new WfRequest();
-                    wfRequestGD.setWfId(wfStatusEntity.getWfId());
-                    wfRequestGD.setUserId(wfStatusEntity.getUserId());
-                    wfRequestGD.setApplicationId(wfStatusEntity.getApplicationId());
-                    wfRequestGD.setActorUserId(wfStatusEntity.getActorUUID());
-                    wfRequestGD.setComment(wfRequest.getComment());
-                    wfRequestGD.setServiceName(wfStatusEntity.getServiceName());
-                    wfRequestGD.setRequestType(wfStatusEntity.getRequestType());
-                    wfRequestGD.setDeptName(wfStatusEntity.getDeptName());
-                    wfRequestGD.setState(wfStatusEntity.getCurrentStatus());
-                    wfRequestGD.setAction(wfRequest.getAction());
-                    wfRequestGD.setUpdateFieldValues(updateFieldValues);
-                    wfRequestsForEvent.add(wfRequestGD);
+            // Update entity fields only if parsing succeeded
+            wfStatusEntity.setCurrentStatus(nextState);
+            wfStatusEntity.setInWorkflow(inWorkflow);
+            wfStatusEntity.setLastUpdatedOn(currentTime);
+            validEntities.add(wfStatusEntity);
 
-                    // Update entity fields only if parsing succeeded
-                    wfStatusEntity.setCurrentStatus(nextState);
-                    wfStatusEntity.setInWorkflow(inWorkflow);
-                    wfStatusEntity.setLastUpdatedOn(currentTime);
-                    validEntities.add(wfStatusEntity);
-
-                } catch (JsonProcessingException e) {
-                    logger.error("Failed to parse updateFieldValues | wfId={}, userId={}, error={}", wfStatusEntity.getWfId(), wfStatusEntity.getUserId(), e.getMessage(), e);
-                }
-            }
-
-            // Save only valid entities
-            if (!CollectionUtils.isEmpty(validEntities)) {
-                wfStatusRepo.saveAll(validEntities);
-            } else {
-                logger.warn("No valid workflow entities to save for userId: {}", userId);
-            }
-
-            // Push workflow events
-            if (!CollectionUtils.isEmpty(wfRequestsForEvent)) {
-                try {
-                    pushWorkflowEvents(Constants.PROFILE_SERVICE_NAME, userId, wfRequestsForEvent, userToken);
-                    logger.info("Pushed {} workflow events for userId: {}", wfRequestsForEvent.size(), userId);
-                } catch (Exception e) {
-                    logger.error("Failed to push workflow events for userId: {}, error={}", userId, e.getMessage(), e);
-                }
-            } else {
-                logger.warn("No valid workflow requests for userId: {}", userId);
-            }
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to parse updateFieldValues | wfId={}, userId={}, error={}", wfStatusEntity.getWfId(), wfStatusEntity.getUserId(), e.getMessage(), e);
         }
     }
 
@@ -505,23 +508,23 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
     private void validateWfRequest(WfRequest wfRequest) {
 
-        if (StringUtils.isEmpty(wfRequest.getState())) {
+        if (!StringUtils.hasLength(wfRequest.getState())) {
             throw new InvalidDataInputException(Constants.STATE_VALIDATION_ERROR);
         }
 
-        if (StringUtils.isEmpty(wfRequest.getApplicationId())) {
+        if (!StringUtils.hasLength(wfRequest.getApplicationId())) {
             throw new InvalidDataInputException(Constants.APPLICATION_ID_VALIDATION_ERROR);
         }
 
-        if (StringUtils.isEmpty(wfRequest.getActorUserId())) {
+        if (!StringUtils.hasLength(wfRequest.getActorUserId())) {
             throw new InvalidDataInputException(Constants.ACTOR_UUID_VALIDATION_ERROR);
         }
 
-        if (StringUtils.isEmpty(wfRequest.getUserId())) {
+        if (!StringUtils.hasLength(wfRequest.getUserId())) {
             throw new InvalidDataInputException(Constants.USER_UUID_VALIDATION_ERROR);
         }
 
-        if (StringUtils.isEmpty(wfRequest.getAction())) {
+        if (!StringUtils.hasLength(wfRequest.getAction())) {
             throw new InvalidDataInputException(Constants.ACTION_VALIDATION_ERROR);
         }
 
@@ -529,7 +532,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
             throw new InvalidDataInputException(Constants.FIELD_VALUE_VALIDATION_ERROR);
         }
 
-        if (StringUtils.isEmpty(wfRequest.getServiceName())) {
+        if (!StringUtils.hasLength(wfRequest.getServiceName())) {
             throw new InvalidDataInputException(Constants.WORKFLOW_SERVICENAME_VALIDATION_ERROR);
         }
 
@@ -537,7 +540,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
     public WorkFlowModel getWorkFlowConfig(String serviceName) {
         try {
-            Map<String, Object> wfConfig = new HashMap<>();
+            Map<String, Object> wfConfig;
             StringBuilder uri = new StringBuilder();
             switch (serviceName) {
                 case Constants.PROFILE_SERVICE_NAME:
@@ -639,7 +642,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
      */
     private void validateUserAndWfStatus(WfRequest wfRequest, WfStatus wfStatus, WfStatusEntity applicationStatus) {
 
-        if (StringUtils.isEmpty(wfRequest.getWfId()) && !wfStatus.getStartState()) {
+        if (!StringUtils.hasLength(wfRequest.getWfId()) && !Boolean.TRUE.equals(wfStatus.getStartState())) {
             throw new ApplicationException(Constants.WORKFLOW_ID_ERROR_MESSAGE);
         }
         if ((!ObjectUtils.isEmpty(applicationStatus))
@@ -650,11 +653,11 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
     }
 
     private void addModificationEntry(WfStatusEntity applicationStatus, String userId, String action, String role) throws IOException {
-        if (!StringUtils.isEmpty(userId) &&
+        if (StringUtils.hasLength(userId) &&
                 Arrays.asList(configuration.getModificationRecordAllowActions().split(Constants.COMMA)).contains(action)) {
             List<Map<String, Object>> historyMap = null;
             String history = applicationStatus.getModificationHistory();
-            if (!StringUtils.isEmpty(history))
+            if (StringUtils.hasLength(history))
                 historyMap = mapper.readValue(history, List.class);
             else
                 historyMap = new ArrayList<>();
@@ -710,7 +713,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
                 redisCacheMgr.putInBasicProfileCache(key, mapper.writeValueAsString(profileNode), configuration.getBasicProfileCacheTtl());
             } else {
-                logger.warn("No cache found for user " + userId);
+                logger.warn("No cache found for user {}", userId);
             }
         } catch (Exception e) {
             logger.error("Error updating professionalDetails in Redis cache", e);

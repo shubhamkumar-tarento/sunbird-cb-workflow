@@ -17,7 +17,6 @@ import java.lang.reflect.Method;
 import java.util.*;
 
 import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class UserProfileWfServiceImplTest {
@@ -529,47 +528,6 @@ class UserProfileWfServiceImplTest {
     }
 
     @Test
-    void handlePendingRequestUpdate_shouldCallWorkflowService() throws Exception {
-        WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId("appId");
-        String deptName = "newDept";
-
-        // Use reflection to access private method
-        Method method = UserProfileWfServiceImpl.class.getDeclaredMethod(
-                "handlePendingRequestUpdate", WfRequest.class, String.class);
-        method.setAccessible(true);
-
-        method.invoke(userProfileWfServiceImpl, wfRequest, deptName);
-
-        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(workflowService).updatePendingRequestsToNewMDO(captor.capture());
-
-        Map<String, Object> captured = captor.getValue();
-        assert captured != null;
-        Map<String, Object> reqBody = (Map<String, Object>) captured.get("request");
-
-        assert reqBody.get("userId").equals("appId");
-        assert reqBody.get("departmentName").equals("newDept");
-    }
-
-    @Test
-    void handlePendingRequestUpdate_shouldLogOnException() throws Exception {
-        WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId("appId");
-        String deptName = "newDept";
-
-        doThrow(new RuntimeException("fail")).when(workflowService).updatePendingRequestsToNewMDO(any());
-
-        Method method = UserProfileWfServiceImpl.class.getDeclaredMethod(
-                "handlePendingRequestUpdate", WfRequest.class, String.class);
-        method.setAccessible(true);
-
-        method.invoke(userProfileWfServiceImpl, wfRequest, deptName);
-
-        verify(workflowService).updatePendingRequestsToNewMDO(any());
-    }
-
-    @Test
     void failedCase_shouldUpdateWfStatusAndSave() throws Exception {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setApplicationId("appId");
@@ -651,12 +609,6 @@ class UserProfileWfServiceImplTest {
     void testUpdateUserProfileData_successAndFailure() throws Exception {
         String userId = "userId";
         Map<String, Object> profileDetails = new HashMap<>();
-        Map<String, Object> userDetails = new HashMap<>();
-        userDetails.put("rootOrgId", "rootOrg");
-        userDetails.put("firstName", "fname");
-        userDetails.put("id", "id");
-        userDetails.put("channel", "channel");
-        userDetails.put("userName", "uname");
 
         WfRequest wfRequest = new WfRequest();
         wfRequest.setApplicationId("appId");
@@ -679,15 +631,15 @@ class UserProfileWfServiceImplTest {
         when(mapper.writeValueAsString(any())).thenReturn("{}");
 
         Method method = UserProfileWfServiceImpl.class.getDeclaredMethod(
-                "updateUserProfileData", String.class, Map.class, List.class, Map.class);
+                "updateUserProfileData", String.class, Map.class, List.class);
         method.setAccessible(true);
 
         // SUCCESS CASE
-        method.invoke(userProfileWfServiceImpl, userId, profileDetails, wfRequests, userDetails);
+        method.invoke(userProfileWfServiceImpl, userId, profileDetails, wfRequests);
         verify(redisCacheMgr).deleteCache("user:basicProfile:userId");
 
         // FAILURE CASE
-        method.invoke(userProfileWfServiceImpl, userId, profileDetails, wfRequests, userDetails);
+        method.invoke(userProfileWfServiceImpl, userId, profileDetails, wfRequests);
     }
 
     @Test

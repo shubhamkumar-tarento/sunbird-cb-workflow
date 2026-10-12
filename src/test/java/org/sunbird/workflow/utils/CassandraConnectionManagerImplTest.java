@@ -81,13 +81,14 @@ class CassandraConnectionManagerImplTest {
 
     @Test
     void testResourceCleanUp() {
-        CassandraConnectionManagerImpl.ResourceCleanUp cleanup = new CassandraConnectionManagerImpl.ResourceCleanUp();
+        CassandraConnectionManagerImpl outer = mock(CassandraConnectionManagerImpl.class);
+        CassandraConnectionManagerImpl.ResourceCleanUp cleanup = outer.new ResourceCleanUp();
 
         Map<String, CqlSession> sessionMap = getStaticSessionMap();
         CqlSession mockSession = mock(CqlSession.class);
         sessionMap.put("keyspace", mockSession);
 
-        setStaticSession(mockSession);
+        setSession(outer, mockSession);
 
         cleanup.run(); // triggers close()
 
@@ -103,11 +104,11 @@ class CassandraConnectionManagerImplTest {
         }
     }
 
-    private void setStaticSession(CqlSession session) {
+    private void setSession(CassandraConnectionManagerImpl target, CqlSession session) {
         try {
             var field = CassandraConnectionManagerImpl.class.getDeclaredField("session");
             field.setAccessible(true);
-            field.set(null, session);
+            field.set(target, session);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

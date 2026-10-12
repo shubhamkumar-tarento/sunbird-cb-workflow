@@ -1,6 +1,5 @@
 package org.sunbird.workflow.service.impl;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Constants;
@@ -13,9 +12,11 @@ import org.sunbird.workflow.service.Workflowservice;
 @Service
 public class PositionWorkFlowServiceImpl implements PositionWorkFlowService {
 
-    @Autowired
-    @Qualifier("workflowServiceImpl")
-    private Workflowservice workflowService;
+    private final Workflowservice workflowService;
+
+    public PositionWorkFlowServiceImpl(@Qualifier("workflowServiceImpl") Workflowservice workflowService) {
+        this.workflowService = workflowService;
+    }
 
     @Override
     public Response createPositionWorkFlow(String rootOrg, String org, WfRequest wfRequest) {

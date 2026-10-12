@@ -7,12 +7,13 @@ import com.google.gson.reflect.TypeToken;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
+import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.Logger;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
+import org.sunbird.workflow.exception.ApplicationException;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.service.impl.NotificationServiceImpl;
 import org.sunbird.workflow.utils.CassandraOperation;
@@ -25,29 +26,21 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 @Service
+@RequiredArgsConstructor
 public class NotificationConsumerV2 {
 
     Logger logger = LogManager.getLogger(NotificationConsumer.class);
 
-    @Autowired
-    private ObjectMapper mapper;
-
-    @Autowired
-    private NotificationServiceImpl notificationService;
-
-    @Autowired
-    private CassandraOperation cassandraOperation;
-
-    @Autowired
-    private Configuration configuration;
+    private final ObjectMapper mapper;
+    private final NotificationServiceImpl notificationService;
+    private final CassandraOperation cassandraOperation;
+    private final Configuration configuration;
 
     @KafkaListener(groupId = "workflowNotificationTopic-consumer-v2", topics = "${kafka.topics.workflow.notification.v2}")
     public void processMessage(ConsumerRecord<String, String> data) {
         try {
             if (StringUtils.isNoneBlank(data.value())) {
-                CompletableFuture.runAsync(() -> {
-                    processNotificationRequest(data.value());
-                });
+                CompletableFuture.runAsync(() -> processNotificationRequest(data.value()));
             } else {
                 logger.error("Error in Notification Consumer: Invalid Kafka Msg");
             }
@@ -61,7 +54,6 @@ public class NotificationConsumerV2 {
             logger.info("Recevied data in notification consumer : {}", strData);
             Map<String, Object> workflowEventObj = mapper.readValue(strData, new TypeReference<Map<String, Object>>() {
             });
-            String userId = (String) workflowEventObj.get(Constants.USER_ID);
             String serviceName = (String) workflowEventObj.get(Constants.SERVICE_NAME);
             @SuppressWarnings("unchecked")
             List<WfRequest> wfRequests = mapper.convertValue(workflowEventObj.get(Constants.WORKFLOW_REQUESTS), new TypeReference<List<WfRequest>>() {
@@ -74,22 +66,14 @@ public class NotificationConsumerV2 {
                         try {
                             notificationService.sendNotificationToMdoAdmin(wfRequest);
                         } catch (IOException e) {
-                            throw new RuntimeException(e);
+                            throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
                         }
                     });
                     break;
-                case Constants.POSITION_SERVICE_NAME:
-                case Constants.DOMAIN_SERVICE_NAME:
-                case Constants.ORGANISATION_SERVICE_NAME:
-                    wfRequests.forEach(wfRequest -> {
-                        notificationService.sendEmailNotification(wfRequest);
-                    });
+                case Constants.POSITION_SERVICE_NAME, Constants.DOMAIN_SERVICE_NAME, Constants.ORGANISATION_SERVICE_NAME:
+                    wfRequests.forEach(wfRequest -> notificationService.sendEmailNotification(wfRequest));
                     break;
-                case Constants.BLENDED_PROGRAM_SERVICE_NAME:
-                case Constants.ONE_STEP_MDO_APPROVAL:
-                case Constants.ONE_STEP_PC_APPROVAL:
-                case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-                case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+                case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
                     wfRequests.forEach(wfRequest -> {
                         Map<String, Object> courseAttributes = getCourseAttributes(wfRequest.getCourseId());
                         wfRequest.setCourseName((String) courseAttributes.get(Constants.COURSE_NAME));

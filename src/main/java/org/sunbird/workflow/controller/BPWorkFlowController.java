@@ -1,6 +1,7 @@
 package org.sunbird.workflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,13 +19,11 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/v1/blendedprogram/workflow")
+@RequiredArgsConstructor
 public class BPWorkFlowController {
 
-    @Autowired
-    private BPWorkFlowService bPWorkFlowService;
-
-    @Autowired
-    private QrCodeSelfEnrolmentService qrCodeSelfEnrolmentService;
+    private final BPWorkFlowService bPWorkFlowService;
+    private final QrCodeSelfEnrolmentService qrCodeSelfEnrolmentService;
 
 
     @PostMapping("/enrol")
@@ -64,8 +63,6 @@ public class BPWorkFlowController {
 
     @PostMapping(path = "/search", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Response> blendedProgramWfSearch(@RequestHeader String rootOrg, @RequestHeader String org, @RequestBody SearchCriteria searchCriteria) {
-        //Department is not eligible filter for the Blended Program Search, marking it as null.
-        //if(searchCriteria !=null) searchCriteria.setDeptName(null);
         Response response = bPWorkFlowService.blendedProgramSearch(rootOrg, org, searchCriteria);
         return new ResponseEntity<>(response, (HttpStatus) response.get(Constants.STATUS));
     }
@@ -151,12 +148,12 @@ public class BPWorkFlowController {
     }
 
     @PostMapping(path = "/getUserApprovalDataInCsv", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<?> getUserApprovalDataInCsv(@RequestBody SearchCriteria searchCriteria) {
+    public ResponseEntity<ByteArrayResource> getUserApprovalDataInCsv(@RequestBody SearchCriteria searchCriteria) {
         return bPWorkFlowService.generateUserApprovalCsv(searchCriteria);
     }
 
     @PostMapping(value = "/bulkApprovalDataFromCsv/{contentId}", consumes = "multipart/form-data")
-    public ResponseEntity<?> loadApprovalDataFromCsv(
+    public ResponseEntity<Object> loadApprovalDataFromCsv(
             @RequestParam("file") MultipartFile file,
             @PathVariable String contentId) throws IOException {
         return bPWorkFlowService.loadApprovalDataFromCsv(file, contentId);

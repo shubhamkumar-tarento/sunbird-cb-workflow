@@ -13,6 +13,9 @@ import java.util.stream.StreamSupport;
  */
 public final class CassandraUtil {
 
+    private CassandraUtil() {
+    }
+
     private static CassandraPropertyReader propertiesCache = CassandraPropertyReader.getInstance();
 
     /**

@@ -9,7 +9,7 @@ class ResponseCodeTest {
 
     @Test
     void testGettersAndSettersForErrorBasedResponseCode() {
-        ResponseCode code = ResponseCode.unAuthorized;
+        ResponseCode code = ResponseCode.UNAUTHORIZED;
         assertEquals(ResponseMessage.Key.UNAUTHORIZED_USER, code.getErrorCode());
         assertEquals(ResponseMessage.Message.UNAUTHORIZED_USER, code.getErrorMessage());
 
@@ -44,13 +44,13 @@ class ResponseCodeTest {
     @Test
     void testGetResponse_knownUnauthorized() {
         ResponseCode result = ResponseCode.getResponse(Constants.UNAUTHORIZED);
-        assertEquals(ResponseCode.unAuthorized, result);
+        assertEquals(ResponseCode.UNAUTHORIZED, result);
     }
 
     @Test
     void testGetResponse_knownCode_internalError() {
         ResponseCode result = ResponseCode.getResponse("INTERNAL_ERROR");
-        assertEquals(ResponseCode.internalError, result);
+        assertEquals(ResponseCode.INTERNAL_ERROR, result);
     }
 
     @Test

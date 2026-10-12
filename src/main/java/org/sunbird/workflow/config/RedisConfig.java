@@ -1,18 +1,20 @@
 package org.sunbird.workflow.config;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 
+import java.time.Duration;
+
 @Configuration
 @EnableCaching
+@RequiredArgsConstructor
 public class RedisConfig {
 
-	@Autowired
-	RedisConfiguration redisConfiguration;
+	private final RedisConfiguration redisConfiguration;
 
 	@Bean
 	public JedisPool jedisPool() {
@@ -39,8 +41,8 @@ public class RedisConfig {
 		poolConfig.setTestOnBorrow(true);
 		poolConfig.setTestOnReturn(true);
 		poolConfig.setTestWhileIdle(true);
-		poolConfig.setMinEvictableIdleTimeMillis(120000);
-		poolConfig.setTimeBetweenEvictionRunsMillis(30000);
+		poolConfig.setMinEvictableIdleDuration(Duration.ofMillis(120000));
+		poolConfig.setTimeBetweenEvictionRuns(Duration.ofMillis(30000));
 		poolConfig.setNumTestsPerEvictionRun(3);
 		poolConfig.setBlockWhenExhausted(true);
 		return poolConfig;

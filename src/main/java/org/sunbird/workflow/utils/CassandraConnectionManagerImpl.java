@@ -5,6 +5,7 @@ import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
+import com.datastax.oss.driver.api.core.metadata.schema.KeyspaceMetadata;
 import com.datastax.oss.driver.api.core.metadata.schema.TableMetadata;
 import com.datastax.oss.driver.internal.core.retry.DefaultRetryPolicy;
 import com.datastax.oss.driver.internal.core.time.AtomicTimestampGenerator;
@@ -20,15 +21,16 @@ import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 @Component
 public class CassandraConnectionManagerImpl implements CassandraConnectionManager {
 
     private static final Map<String, CqlSession> cassandraSessionMap = new ConcurrentHashMap<>(2);
     private static final Logger logger = LoggerFactory.getLogger(CassandraConnectionManagerImpl.class);
-    private static CqlSession session;
+    private static final String LOCAL_DATACENTER = "datacenter1";
+    private CqlSession session;
 
     @Override
     public CqlSession getSession(String keyspaceName) {
@@ -55,7 +57,7 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
 		} catch (Exception e) {
 			logger.error("Error while creating Cassandra connection", e);
 			throw new ProjectCommonException(
-					ResponseCode.internalError.getErrorCode(),
+					ResponseCode.INTERNAL_ERROR.getErrorCode(),
 					e.getMessage(),
 					ResponseCode.SERVER_ERROR.getResponseCode());
 		}
@@ -68,7 +70,7 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
             String cassandraHost = cache.getProperty(Constants.CASSANDRA_CONFIG_HOST);
             if (StringUtils.isBlank(cassandraHost)) {
                 throw new ProjectCommonException(
-                        ResponseCode.internalError.getErrorCode(),
+                        ResponseCode.INTERNAL_ERROR.getErrorCode(),
                         "Cassandra host is not configured",
                         ResponseCode.SERVER_ERROR.getResponseCode());
             }
@@ -76,15 +78,17 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
             List<String> hosts = Arrays.asList(cassandraHost.split(","));
             List<InetSocketAddress> contactPoints = hosts.stream()
                     .map(host -> new InetSocketAddress(host.trim(), 9042)) // Assuming default port 9042
-                    .collect(Collectors.toList());
+                    .toList();
 
             List<String> contactPointsString = hosts.stream()
                     .map(host -> host.trim() + ":9042") // Ensure proper host:port format
-                    .collect(Collectors.toList());
+                    .toList();
+            ConsistencyLevel consistencyLevel = getConsistencyLevel();
             DriverConfigLoader loader = DriverConfigLoader.programmaticBuilder()
                     .withStringList(DefaultDriverOption.CONTACT_POINTS, contactPointsString)
-                    .withString(DefaultDriverOption.REQUEST_CONSISTENCY, getConsistencyLevel().name())
-                    .withString(DefaultDriverOption.LOAD_BALANCING_LOCAL_DATACENTER, "datacenter1")
+                    .withString(DefaultDriverOption.REQUEST_CONSISTENCY,
+                            consistencyLevel != null ? consistencyLevel.name() : DefaultConsistencyLevel.LOCAL_QUORUM.name())
+                    .withString(DefaultDriverOption.LOAD_BALANCING_LOCAL_DATACENTER, LOCAL_DATACENTER)
                     .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE,
                             Integer.parseInt(cache.getProperty(Constants.CORE_CONNECTIONS_PER_HOST_FOR_LOCAL)))
                     .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE,
@@ -102,31 +106,31 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
             if (StringUtils.isNotBlank(keySpaceName)) {
                 sessionWithKeyspaces = CqlSession.builder()
                         .addContactPoints(contactPoints)
-                        .withLocalDatacenter("datacenter1")
+                        .withLocalDatacenter(LOCAL_DATACENTER)
                         .withKeyspace(keySpaceName)
                         .withConfigLoader(loader)
                         .build();
             } else {
                 sessionWithKeyspaces = CqlSession.builder()
                         .addContactPoints(contactPoints)
-                        .withLocalDatacenter("datacenter1")
+                        .withLocalDatacenter(LOCAL_DATACENTER)
                         .withConfigLoader(loader)
                         .build();
             }
-            logger.info("Connected to the keyspaces: " + keySpaceName);
+            logger.info("Connected to the keyspaces: {}", keySpaceName);
             // Get metadata and log cluster information
             final Metadata metadata = sessionWithKeyspaces.getMetadata();
-            logger.info(String.format("Connected to cluster: %s", metadata.getClusterName()));
+            logger.info("Connected to cluster: {}", metadata.getClusterName());
 
             // Log nodes in the cluster
             for (Node host : metadata.getNodes().values()) {
-                logger.info(String.format("Datacenter: %s; Host: %s; Rack: %s", host.getDatacenter(), host.getEndPoint(), host.getRack()));
+                logger.info("Datacenter: {}; Host: {}; Rack: {}", host.getDatacenter(), host.getEndPoint(), host.getRack());
             }
             return sessionWithKeyspaces;
         } catch (Exception e) {
             logger.error("Error while creating Cassandra connection", e);
             throw new ProjectCommonException(
-                    ResponseCode.internalError.getErrorCode(),
+                    ResponseCode.INTERNAL_ERROR.getErrorCode(),
                     e.getMessage(),
                     ResponseCode.SERVER_ERROR.getResponseCode());
         }
@@ -135,7 +139,7 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
     private static ConsistencyLevel getConsistencyLevel() {
         String consistency = ProjectUtil.getConfigValue(Constants.SUNBIRD_CASSANDRA_CONSISTENCY_LEVEL);
 
-        logger.info("CassandraConnectionManagerImpl:getConsistencyLevel: level = " + consistency);
+        logger.info("CassandraConnectionManagerImpl:getConsistencyLevel: level = {}", consistency);
 
         if (StringUtils.isBlank(consistency)) return null;
 
@@ -153,35 +157,36 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
         try {
             // Fetch the metadata for the keyspace and list tables
             Metadata metadata = session.getMetadata();
-            if (metadata.getKeyspace(keyspaceName).isPresent()) {
+            Optional<KeyspaceMetadata> keyspaceMetadata = metadata.getKeyspace(keyspaceName);
+            if (keyspaceMetadata.isPresent()) {
                 // Convert the Map<CqlIdentifier, TableMetadata> to a List<String> with table names
-                Map<CqlIdentifier, TableMetadata> tables = metadata.getKeyspace(keyspaceName).get().getTables();
+                Map<CqlIdentifier, TableMetadata> tables = keyspaceMetadata.get().getTables();
                 return tables.keySet().stream()
                         .map(CqlIdentifier::toString)
-                        .collect(Collectors.toList());
+                        .toList();
             } else {
                 throw new ProjectCommonException(
-                        ResponseCode.internalError.getErrorCode(),
+                        ResponseCode.INTERNAL_ERROR.getErrorCode(),
                         "Keyspace not found: " + keyspaceName,
                         ResponseCode.SERVER_ERROR.getResponseCode());
             }
         } catch (Exception e) {
-            logger.error("Error fetching tables for keyspace: " + keyspaceName, e);
+            logger.error("Error fetching tables for keyspace: {}", keyspaceName, e);
             throw new ProjectCommonException(
-                    ResponseCode.internalError.getErrorCode(),
-                    e.getMessage(),
+                    ResponseCode.INTERNAL_ERROR.getErrorCode(),
+                    "Error fetching tables for keyspace " + keyspaceName + ": " + e.getMessage(),
                     ResponseCode.SERVER_ERROR.getResponseCode());
         }
     }
 
-    public static void registerShutDownHook() {
+    public void registerShutDownHook() {
         Runtime runtime = Runtime.getRuntime();
         runtime.addShutdownHook(new ResourceCleanUp());
         logger.info("Cassandra ShutDownHook registered.");
     }
 
     // Clean up resources when JVM terminates
-    static class ResourceCleanUp extends Thread {
+    class ResourceCleanUp extends Thread {
         @Override
         public void run() {
             try {

@@ -1,8 +1,8 @@
 package org.sunbird.workflow.service.impl;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
@@ -16,15 +16,13 @@ import java.util.Map;
  * @author mahesh.vakkund
  */
 @Service
+@RequiredArgsConstructor
 public class ContentReadServiceImpl implements ContentReadService {
 
     private Logger logger = LoggerFactory.getLogger(ContentReadServiceImpl.class);
 
-    @Autowired
-    private Configuration configuration;
-
-    @Autowired
-    private RequestServiceImpl requestServiceImpl;
+    private final Configuration configuration;
+    private final RequestServiceImpl requestServiceImpl;
 
     /**
      * Service Method to get the service name and other details from the content-service.
@@ -75,7 +73,7 @@ public class ContentReadServiceImpl implements ContentReadService {
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while fetching RootOrgId : " + e);
+            logger.info("There is a error occured while fetching RootOrgId", e);
         }
         return null;
     }

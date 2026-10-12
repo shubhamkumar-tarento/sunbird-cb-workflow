@@ -74,7 +74,7 @@ class ApplicationProcessingServiceImplV2Test {
         List<WfRequest> requests = List.of(req);
         service.processWfApplicationRequest(requests, Constants.DOMAIN, "user1", null);
         verify(domainWhiteListWorkFlowService).processDomainRequest(req);
-        verify(bpWorkFlowService).processWFRequest(req);
+        verify(bpWorkFlowService, never()).processWFRequest(req);
     }
 
     @Test

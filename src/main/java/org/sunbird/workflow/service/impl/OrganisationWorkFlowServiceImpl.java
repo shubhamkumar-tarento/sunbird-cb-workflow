@@ -2,7 +2,6 @@ package org.sunbird.workflow.service.impl;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -21,17 +20,18 @@ import java.util.Map;
 @Service
 public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowService {
 
-    @Autowired
-    @Qualifier("workflowServiceImpl")
-    private Workflowservice workflowService;
-
-    @Autowired
-    private Configuration configuration;
-
-    @Autowired
-    private RequestServiceImpl requestServiceImpl;
+    private final Workflowservice workflowService;
+    private final Configuration configuration;
+    private final RequestServiceImpl requestServiceImpl;
 
     private Logger logger = LoggerFactory.getLogger(OrganisationWorkFlowServiceImpl.class);
+
+    public OrganisationWorkFlowServiceImpl(@Qualifier("workflowServiceImpl") Workflowservice workflowService,
+            Configuration configuration, RequestServiceImpl requestServiceImpl) {
+        this.workflowService = workflowService;
+        this.configuration = configuration;
+        this.requestServiceImpl = requestServiceImpl;
+    }
 
     /**
      * Service method to handle the creation of Users.

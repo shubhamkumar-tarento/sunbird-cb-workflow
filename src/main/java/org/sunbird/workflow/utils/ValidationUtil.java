@@ -8,6 +8,8 @@ import java.util.regex.Pattern;
 
 public class ValidationUtil {
 
+	private ValidationUtil() {
+	}
 
 	public static final String DEFAULT_BULK_UPLOAD_VERIFICATION_REGEX = "^[a-zA-Z\\s,]+$";
 
@@ -15,8 +17,8 @@ public class ValidationUtil {
 		return (value == null || "".equals(value.trim()));
 	}
 
-	public static Boolean validateEmailPattern(String email) {
-		String emailRegex = "^[a-zA-Z0-9_+&*-]+(?:\\." + "[a-zA-Z0-9_+&*-]+)*@" + "(?:[a-zA-Z0-9-]+\\.)+[a-z"
+	public static boolean validateEmailPattern(String email) {
+		String emailRegex = "^[a-zA-Z0-9_+&*-]++(?:\\." + "[a-zA-Z0-9_+&*-]++)*+@" + "(?:[a-zA-Z0-9-]++\\.)++[a-z"
 				+ "A-Z]{2,7}$";
 		Pattern pat = Pattern.compile(emailRegex);
 		if (pat.matcher(email).matches()) {
@@ -25,7 +27,7 @@ public class ValidationUtil {
 		return Boolean.FALSE;
 	}
 
-	public static Boolean validateContactPattern(String contactNumber) {
+	public static boolean validateContactPattern(String contactNumber) {
 		String contactNumberRegex = "^\\d{10}$";
 		Pattern pat = Pattern.compile(contactNumberRegex);
 		if (pat.matcher(contactNumber).matches()) {
@@ -34,7 +36,7 @@ public class ValidationUtil {
 		return Boolean.FALSE;
 	}
 
-	public static Boolean validateDate(String dateString){
+	public static boolean validateDate(String dateString){
 		SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
 		dateFormat.setLenient(false);
 		try {
@@ -50,19 +52,19 @@ public class ValidationUtil {
 		return false;
 	}
 
-	public static Boolean validateExternalSystemId(String externalSystemId) {
-		return externalSystemId.matches("^(?=.{1,30}$)[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$");
+	public static boolean validateExternalSystemId(String externalSystemId) {
+		return externalSystemId.matches("^(?=.{1,30}$)[a-zA-Z0-9]++(?:-[a-zA-Z0-9]++)*+$");
 	}
 
-	public static Boolean validateExternalSystem(String externalSystem) {
+	public static boolean validateExternalSystem(String externalSystem) {
 		return externalSystem.matches("^(?=.*[a-zA-Z .-])[a-zA-Z0-9 .-]{1,255}$"); // Allow only alphanumeric, alphabets and restrict if only numeric character
 	}
 
-	public static Boolean validateFullName(String firstName) {
-		return firstName.matches("^(?!.*\\n)[a-zA-Z]+(?:['\\s][a-zA-Z]+)*(?<!\\.|\\s)$");
+	public static boolean validateFullName(String firstName) {
+		return firstName.matches("^(?!.*\\n)[a-zA-Z]++(?:['\\s][a-zA-Z]++)*+(?<!\\.|\\s)$");
 	}
 
-	public static Boolean validateTag(List<String> tags) {
+	public static boolean validateTag(List<String> tags) {
 		String regEx = DEFAULT_BULK_UPLOAD_VERIFICATION_REGEX;
 		for (String tag : tags) {
 			if (!tag.matches(regEx)) {
@@ -72,19 +74,19 @@ public class ValidationUtil {
 		return true;
 	}
 
-	public static Boolean validateEmployeeId(String employeeId) {
+	public static boolean validateEmployeeId(String employeeId) {
 		return employeeId.matches("^[a-zA-Z0-9]{1,30}$"); // Allow alphabetic, alphanumeric, and numeric character(s).
 	}
 
-	public static Boolean validateRegexPatternWithNoSpecialCharacter(String regex) {
+	public static boolean validateRegexPatternWithNoSpecialCharacter(String regex) {
 		return regex.matches("^[a-zA-Z0-9 \\-()&/]*$");
 	}
 
-	public static Boolean validateCsvDesignationPattern(String designation, String designationRegex) {
+	public static boolean validateCsvDesignationPattern(String designation, String designationRegex) {
 		return designation.matches(designationRegex);
 	}
 
-	public static Boolean validatePinCode(String regex) {
+	public static boolean validatePinCode(String regex) {
 		return regex.matches("^[0-9]{6}$");
 	}
 }

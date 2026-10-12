@@ -125,8 +125,9 @@ class BPWorkFlowServiceImplTest {
     @Test
     void testGenerateUserApprovalCsv_IOException() throws Exception {
         SearchCriteria criteria = new SearchCriteria();
-        BPWorkFlowServiceImpl spyService = Mockito.spy(new BPWorkFlowServiceImpl());
-        ReflectionTestUtils.setField(spyService, "workflowService", workflowservice);
+        BPWorkFlowServiceImpl spyService = Mockito.spy(new BPWorkFlowServiceImpl(workflowservice, cassandraOperation,
+                requestServiceImpl, configuration, wfStatusRepo, mapper, producer, contentReadService, userUtils,
+                elasticsearchServiceManager));
 
         Map<String, Object> userInfo = Map.of("email", "test@example.com", "firstName", "John");
         WfStatusEntity wf1 = new WfStatusEntity();
@@ -1222,10 +1223,10 @@ class BPWorkFlowServiceImplTest {
         String userId = "user123";
         boolean isPc = true;
 
-        WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId("app123");
-        wfRequest.setCourseId("course123");
-        wfRequest.setUserId(userId);
+        WfRequest localWfRequest = new WfRequest();
+        localWfRequest.setApplicationId("app123");
+        localWfRequest.setCourseId("course123");
+        localWfRequest.setUserId(userId);
 
         WfStatusEntity entity = new WfStatusEntity();
         entity.setWfId("wf-id-01");
@@ -1246,10 +1247,10 @@ class BPWorkFlowServiceImplTest {
         updateResponse.put(Constants.STATUS, HttpStatus.OK);
 
         doReturn(updateResponse).when(bpWorkFlowService)
-                .updateBPWorkFlow("igot", "org123", wfRequest, userId, Constants.PROGRAM_COORDINATOR);
+                .updateBPWorkFlow("igot", "org123", localWfRequest, userId, Constants.PROGRAM_COORDINATOR);
 
         // Act
-        Response result = bpWorkFlowService.removeApprovedUser(wfRequest, isPc);
+        Response result = bpWorkFlowService.removeApprovedUser(localWfRequest, isPc);
 
         // Assert
         assertEquals(HttpStatus.OK, result.get(Constants.STATUS));
@@ -1553,9 +1554,9 @@ class BPWorkFlowServiceImplTest {
 
     @Test
     void testReverseApprovedRequest_updatesRequestAndPersistsEntity() throws Exception {
-        WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId("app123");
-        wfRequest.setWfId("wf123");
+        WfRequest localWfRequest = new WfRequest();
+        localWfRequest.setApplicationId("app123");
+        localWfRequest.setWfId("wf123");
         Date createdOn = new Date();
         WfStatusEntity entity = new WfStatusEntity();
         entity.setWfId("wf123");
@@ -1565,8 +1566,8 @@ class BPWorkFlowServiceImplTest {
         entity.setLastUpdatedOn(null);
         when(wfStatusRepo.findByApplicationIdAndWfId("app123", "wf123")).thenReturn(entity);
         when(wfStatusRepo.save(any(WfStatusEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        ReflectionTestUtils.invokeMethod(bpWorkFlowService, "reverseApprovedRequest", wfRequest);
-        assertEquals(createdOn.toString(), wfRequest.getCreatedOn(), "WfRequest.createdOn should be copied from entity.createdOn");
+        ReflectionTestUtils.invokeMethod(bpWorkFlowService, "reverseApprovedRequest", localWfRequest);
+        assertEquals(createdOn.toString(), localWfRequest.getCreatedOn(), "WfRequest.createdOn should be copied from entity.createdOn");
         assertEquals(Constants.SEND_FOR_PC_APPROVAL, entity.getCurrentStatus(), "Entity status should be set to SEND_FOR_PC_APPROVAL");
         assertNotNull(entity.getLastUpdatedOn(), "Entity.lastUpdatedOn should be updated");
         verify(wfStatusRepo).save(entity);

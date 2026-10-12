@@ -7,13 +7,13 @@ import org.sunbird.workflow.config.Constants;
  * @author Manzarul
  */
 public enum ResponseCode {
-    unAuthorized(ResponseMessage.Key.UNAUTHORIZED_USER, ResponseMessage.Message.UNAUTHORIZED_USER),
-    internalError(ResponseMessage.Key.INTERNAL_ERROR, ResponseMessage.Message.INTERNAL_ERROR),
+    UNAUTHORIZED(ResponseMessage.Key.UNAUTHORIZED_USER, ResponseMessage.Message.UNAUTHORIZED_USER),
+    INTERNAL_ERROR(ResponseMessage.Key.INTERNAL_ERROR, ResponseMessage.Message.INTERNAL_ERROR),
 
     OK(200),
     CLIENT_ERROR(400),
     SERVER_ERROR(500);
-    private int responseCode;
+    private int httpResponseCode;
     /**
      * error code contains String value
      */
@@ -32,8 +32,8 @@ public enum ResponseCode {
         this.errorMessage = errorMessage;
     }
 
-    ResponseCode(int responseCode) {
-        this.responseCode = responseCode;
+    ResponseCode(int httpResponseCode) {
+        this.httpResponseCode = httpResponseCode;
     }
 
     /**
@@ -46,7 +46,7 @@ public enum ResponseCode {
         if (StringUtils.isBlank(errorCode)) {
             return null;
         } else if (Constants.UNAUTHORIZED.equals(errorCode)) {
-            return ResponseCode.unAuthorized;
+            return ResponseCode.UNAUTHORIZED;
         } else {
             ResponseCode value = null;
             ResponseCode[] responseCodes = ResponseCode.values();
@@ -96,10 +96,10 @@ public enum ResponseCode {
     }
 
     public int getResponseCode() {
-        return responseCode;
+        return httpResponseCode;
     }
 
-    public void setResponseCode(int responseCode) {
-        this.responseCode = responseCode;
+    public void setResponseCode(int httpResponseCode) {
+        this.httpResponseCode = httpResponseCode;
     }
 }

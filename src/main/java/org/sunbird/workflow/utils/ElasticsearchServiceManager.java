@@ -26,22 +26,22 @@ import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Constants;
 
 @Service
+@RequiredArgsConstructor
 public class ElasticsearchServiceManager {
     Logger logger = LogManager.getLogger(ElasticsearchServiceManager.class);
 
     @Value("${user_index_name}")
     private String userIndexName;
 
-    @Autowired
-    private RestHighLevelClient client;
+    private final RestHighLevelClient client;
 
-    public static final String _DOC = "_doc";
+    public static final String DOC_TYPE = "_doc";
 
     public boolean upsertWfRequest(String userId, List<String> wfRequests) {
         try {
@@ -49,7 +49,7 @@ public class ElasticsearchServiceManager {
             Map<String, Object> updates = new HashMap<>();
             updates.put(Constants.WF_REQUESTS_KEY, wfRequests);
 
-            UpdateRequest updateRequest = new UpdateRequest(userIndexName, _DOC, userId)
+            UpdateRequest updateRequest = new UpdateRequest(userIndexName, DOC_TYPE, userId)
                     .doc(updates)
                     .upsert(new IndexRequest(userIndexName).id(userId).source(updates));
 
@@ -68,7 +68,7 @@ public class ElasticsearchServiceManager {
     public boolean removeWfRequest(String userId, String wfRequestToRemove) {
         try {
             // Fetch the existing document
-            GetResponse getResponse = client.get(new org.elasticsearch.action.get.GetRequest(userIndexName, _DOC, userId),
+            GetResponse getResponse = client.get(new org.elasticsearch.action.get.GetRequest(userIndexName, DOC_TYPE, userId),
                     RequestOptions.DEFAULT);
 
             if (!getResponse.isExists()) {
@@ -90,7 +90,7 @@ public class ElasticsearchServiceManager {
             source.put(Constants.WF_REQUESTS_KEY, wfRequests);
 
             // Update document
-            UpdateRequest updateRequest = new UpdateRequest(userIndexName, _DOC, userId).doc(source);
+            UpdateRequest updateRequest = new UpdateRequest(userIndexName, DOC_TYPE, userId).doc(source);
             client.update(updateRequest, RequestOptions.DEFAULT);
 
             logger.info("wfRequest with id: {} is removed successfully from user: {}", wfRequestToRemove, userId);
@@ -112,45 +112,7 @@ public class ElasticsearchServiceManager {
             sourceBuilder.size(size);
 
             // Build the bool query
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-
-            // if query is email address then check against
-            // profileDetails.personalDetails.primaryEmail
-            // if query is valid mobile number then check against
-            // profileDetails.personalDetails.mobile
-            // if query is none of above use SimpleQueryStringBuilder to get data
-            if (ProjectUtil.isValidEmail(queryString)) {
-                boolQuery.must(QueryBuilders.termQuery(Constants.PROFILE_PRIMARY_EMAIL_FIELD, queryString));
-            } else if (ProjectUtil.isValidMobileNumber(queryString)) {
-                boolQuery.must(QueryBuilders.termQuery(Constants.PROFILE_PHONE_NUMBER_FILED, queryString));
-            } else {
-                SimpleQueryStringBuilder simpleQuery = QueryBuilders.simpleQueryStringQuery(queryString)
-                        .defaultOperator(org.elasticsearch.index.query.Operator.OR)
-                        .analyzeWildcard(false)
-                        .autoGenerateSynonymsPhraseQuery(true)
-                        .fuzzyPrefixLength(0)
-                        .fuzzyMaxExpansions(50)
-                        .fuzzyTranspositions(true)
-                        .boost(1.0f);
-
-                for (String field : Constants.USER_DEFAULT_SEARCH_FIELDS) {
-                    simpleQuery.field(field);
-                }
-
-                boolQuery.must(simpleQuery);
-            }
-
-            if (requestTypes.contains(Constants.ORG_TRANSFER_REQUEST)) {
-                boolQuery.must(QueryBuilders.termQuery(Constants.WF_TRANSFER_REQUEST_DEPTNAME_KEY, deptName));
-            } else {
-                BoolQueryBuilder wfProfileQuery = QueryBuilders.boolQuery()
-                        .should(QueryBuilders.termQuery(Constants.WF_PROFILE_DESIGNATION_REQUEST_DEPTNAME_KEY,
-                                deptName))
-                        .should(QueryBuilders.termQuery(Constants.WF_PROFILE_GROUP_REQEST_DEPTNAME_KEY, deptName))
-                        .minimumShouldMatch(1); // Ensures at least one of these conditions is met
-
-                boolQuery.must(wfProfileQuery).mustNot(QueryBuilders.existsQuery(Constants.WF_TRANSFER_REQUEST_STRING));
-            }
+            BoolQueryBuilder boolQuery = buildUserSearchBoolQuery(queryString, deptName, requestTypes);
 
             sourceBuilder.query(boolQuery);
 
@@ -164,25 +126,7 @@ public class ElasticsearchServiceManager {
             SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
 
             for (SearchHit hit : searchResponse.getHits().getHits()) {
-                Map<String, Object> sourceMap = (Map<String, Object>) hit.getSourceAsMap();
-                Map<String, Object> record = new HashMap<>();
-                record.put(Constants.ID, sourceMap.get(Constants.ID));
-                record.put(Constants.UUID, sourceMap.get(Constants.ID));
-                record.put(Constants.ROOT_ORG_ID, sourceMap.get(Constants.ROOT_ORG_ID));
-                record.put(Constants.SEARCH_SCORE, hit.getScore());
-                HashMap<String, Object> profileDetails = (HashMap<String, Object>) sourceMap
-                        .get(Constants.PROFILE_DETAILS);
-                if (MapUtils.isNotEmpty(profileDetails)) {
-                    HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
-                            .get(Constants.PERSONAL_DETAILS);
-                    record.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
-                    record.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
-                    Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails
-                            .get(Constants.ADDITIONAL_PROPERTIES);
-                    if (MapUtils.isNotEmpty(additionalProperties)) {
-                        record.put(Constants.TAG, additionalProperties.get(Constants.TAG));
-                    }
-                }
+                Map<String, Object> record = mapSearchHitToUserRecord(hit);
                 userInfo.put((String) record.get(Constants.ID), record);
             }
             totalHits = searchResponse.getHits().getTotalHits();
@@ -190,6 +134,72 @@ public class ElasticsearchServiceManager {
             logger.error("Failed to query ES to find records for given query.", e);
         }
         return totalHits;
+    }
+
+    private BoolQueryBuilder buildUserSearchBoolQuery(String queryString, String deptName, List<String> requestTypes) {
+        BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+
+        // if query is email address then check against
+        // profileDetails.personalDetails.primaryEmail
+        // if query is valid mobile number then check against
+        // profileDetails.personalDetails.mobile
+        // if query is none of above use SimpleQueryStringBuilder to get data
+        if (ProjectUtil.isValidEmail(queryString)) {
+            boolQuery.must(QueryBuilders.termQuery(Constants.PROFILE_PRIMARY_EMAIL_FIELD, queryString));
+        } else if (ProjectUtil.isValidMobileNumber(queryString)) {
+            boolQuery.must(QueryBuilders.termQuery(Constants.PROFILE_PHONE_NUMBER_FILED, queryString));
+        } else {
+            SimpleQueryStringBuilder simpleQuery = QueryBuilders.simpleQueryStringQuery(queryString)
+                    .defaultOperator(org.elasticsearch.index.query.Operator.OR)
+                    .analyzeWildcard(false)
+                    .autoGenerateSynonymsPhraseQuery(true)
+                    .fuzzyPrefixLength(0)
+                    .fuzzyMaxExpansions(50)
+                    .fuzzyTranspositions(true)
+                    .boost(1.0f);
+
+            for (String field : Constants.USER_DEFAULT_SEARCH_FIELDS) {
+                simpleQuery.field(field);
+            }
+
+            boolQuery.must(simpleQuery);
+        }
+
+        if (requestTypes.contains(Constants.ORG_TRANSFER_REQUEST)) {
+            boolQuery.must(QueryBuilders.termQuery(Constants.WF_TRANSFER_REQUEST_DEPTNAME_KEY, deptName));
+        } else {
+            BoolQueryBuilder wfProfileQuery = QueryBuilders.boolQuery()
+                    .should(QueryBuilders.termQuery(Constants.WF_PROFILE_DESIGNATION_REQUEST_DEPTNAME_KEY,
+                            deptName))
+                    .should(QueryBuilders.termQuery(Constants.WF_PROFILE_GROUP_REQEST_DEPTNAME_KEY, deptName))
+                    .minimumShouldMatch(1); // Ensures at least one of these conditions is met
+
+            boolQuery.must(wfProfileQuery).mustNot(QueryBuilders.existsQuery(Constants.WF_TRANSFER_REQUEST_STRING));
+        }
+        return boolQuery;
+    }
+
+    private Map<String, Object> mapSearchHitToUserRecord(SearchHit hit) {
+        Map<String, Object> sourceMap = (Map<String, Object>) hit.getSourceAsMap();
+        Map<String, Object> record = new HashMap<>();
+        record.put(Constants.ID, sourceMap.get(Constants.ID));
+        record.put(Constants.UUID, sourceMap.get(Constants.ID));
+        record.put(Constants.ROOT_ORG_ID, sourceMap.get(Constants.ROOT_ORG_ID));
+        record.put(Constants.SEARCH_SCORE, hit.getScore());
+        HashMap<String, Object> profileDetails = (HashMap<String, Object>) sourceMap
+                .get(Constants.PROFILE_DETAILS);
+        if (MapUtils.isNotEmpty(profileDetails)) {
+            HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
+                    .get(Constants.PERSONAL_DETAILS);
+            record.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
+            record.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+            Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails
+                    .get(Constants.ADDITIONAL_PROPERTIES);
+            if (MapUtils.isNotEmpty(additionalProperties)) {
+                record.put(Constants.TAG, additionalProperties.get(Constants.TAG));
+            }
+        }
+        return record;
     }
 
     public boolean updateWfRequest(String userId, String uuid, boolean append) {
@@ -228,7 +238,7 @@ public class ElasticsearchServiceManager {
 
             // Create the UpdateRequest with a retry_on_conflict setting to handle rapid
             // concurrent updates
-            UpdateRequest updateRequest = new UpdateRequest(userIndexName, _DOC, userId)
+            UpdateRequest updateRequest = new UpdateRequest(userIndexName, DOC_TYPE, userId)
                     .script(script)
                     .upsert(new IndexRequest(userIndexName).id(userId).source(upsertContent))
                     .retryOnConflict(5);
@@ -286,7 +296,7 @@ public class ElasticsearchServiceManager {
             }
 
             // Create UpdateRequest
-            UpdateRequest updateRequest = new UpdateRequest(userIndexName, _DOC, userId)
+            UpdateRequest updateRequest = new UpdateRequest(userIndexName, DOC_TYPE, userId)
                     .script(script)
                     .upsert(upsertContent) // Creates the document if missing
                     .retryOnConflict(5); // Handle concurrent updates
@@ -333,7 +343,7 @@ public class ElasticsearchServiceManager {
             logger.error("Exception in getting the record from ElasticSearch", e);
         }
         if (null == response)
-            return null;
+            return Collections.emptyMap();
         return response.getSourceAsMap();
     }
 }

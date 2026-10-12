@@ -78,7 +78,7 @@ class ApplicationProcessingServiceImplTest {
         service.processWfApplicationRequest(request);
 
         verify(domainWhiteListWorkFlowService).processDomainRequest(request);
-        verify(bpWorkFlowService).processWFRequest(request);
+        verify(bpWorkFlowService, never()).processWFRequest(request);
     }
 
     @Test

@@ -55,7 +55,7 @@ public class NotificationRequest {
         return rawData;
     }
 
-    public void setRawData(Map rawData) {
+    public void setRawData(Map<String, String> rawData) {
         this.rawData = rawData;
     }
 }
