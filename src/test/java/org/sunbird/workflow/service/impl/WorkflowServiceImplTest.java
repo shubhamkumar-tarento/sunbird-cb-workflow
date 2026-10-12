@@ -35,6 +35,7 @@ import org.sunbird.workflow.utils.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -1233,7 +1234,10 @@ class WorkflowServiceImplTest {
         verify(storageService).downloadFile(fileName);
 
         // Optional: Validate file content
-        byte[] actualBytes = response.getBody().getInputStream().readAllBytes();
+        byte[] actualBytes;
+        try (InputStream inputStream = response.getBody().getInputStream()) {
+            actualBytes = inputStream.readAllBytes();
+        }
         assertArrayEquals(fileContent.getBytes(), actualBytes);
 
         // Clean up (optional)
