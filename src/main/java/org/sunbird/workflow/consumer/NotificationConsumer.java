@@ -69,11 +69,8 @@ public class NotificationConsumer {
 				case Constants.POSITION_SERVICE_NAME, Constants.DOMAIN_SERVICE_NAME, Constants.ORGANISATION_SERVICE_NAME:
 					notificationService.sendEmailNotification(wfRequest);
 					break;
-				case Constants.BLENDED_PROGRAM_SERVICE_NAME:
-				case Constants.ONE_STEP_MDO_APPROVAL:
-				case Constants.ONE_STEP_PC_APPROVAL:
-				case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-				case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+				case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL,
+						Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
 					Map<String, Object> courseAttributes = getCourseAttributes(wfRequest.getCourseId());
 					wfRequest.setCourseName((String) courseAttributes.get(Constants.COURSE_NAME));
 					notificationService.sendNotification(wfRequest);

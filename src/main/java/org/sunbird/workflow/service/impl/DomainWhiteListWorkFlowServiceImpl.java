@@ -88,7 +88,8 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
             String description = (String) updatedFieldValue.get("description");
             List<WfDomainUserInfo> userInfo = wfDomainUserInfoRepo.findByDomainNameAndEmailAndMobile(domainValue, email, phone);
             if (CollectionUtils.isEmpty(userInfo)) {
-                response = handleNewDomainRequest(response, rootOrg, org, wfRequest, domainValue, email, phone, description, firstName);
+                response = handleNewDomainRequest(response, rootOrg, org, wfRequest, domainValue,
+                        new DomainRequesterInfo(email, phone, description, firstName));
             } else {
                 handleExistingDomainRequest(response, domainValue);
             }
@@ -101,10 +102,13 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
         return response;
     }
 
+    private record DomainRequesterInfo(String email, String phone, String description, String firstName) {
+    }
+
     private Response handleNewDomainRequest(Response response, String rootOrg, String org, WfRequest wfRequest,
-            String domainValue, String email, String phone, String description, String firstName) throws JsonProcessingException {
+            String domainValue, DomainRequesterInfo requesterInfo) throws JsonProcessingException {
         List<WfDomainLookup> domainLookup = wfDomainLookupRepo.findByDomainName(domainValue);
-        addWfDomainUserInfo(email, domainValue, phone, description, firstName);
+        addWfDomainUserInfo(requesterInfo.email(), domainValue, requesterInfo.phone(), requesterInfo.description(), requesterInfo.firstName());
         Long userDomainInfoCount = wfDomainUserInfoRepo.countByDomainName(domainValue);
         if (CollectionUtils.isNotEmpty(domainLookup)) {
             WfStatusEntity wfStatusEntity = wfStatusRepo.findByWfId(domainLookup.get(0).getWfId());

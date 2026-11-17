@@ -141,7 +141,7 @@ public class UserBulkUploadService {
         BulkUploadCounters counters = new BulkUploadCounters();
         String status;
         try {
-            file = new File(Constants.LOCAL_BASE_PATH + inputDataMap.get(Constants.FILE_NAME));
+            file = new File(configuration.getLocalBasePath() + inputDataMap.get(Constants.FILE_NAME));
             if (file.exists() && file.length() > 0) {
                 status = processBulkUploadFile(file, inputDataMap, counters);
             } else {
@@ -235,49 +235,63 @@ public class UserBulkUploadService {
 
     private RowEmailPhoneValidation validateEmailAndPhoneForRow(Row nextRow, List<String> errList) {
         RowEmailPhoneValidation result = new RowEmailPhoneValidation();
+        String email = validateEmailForRow(nextRow, errList, result);
+        validatePhoneForRow(nextRow, errList, result);
+        applyEmailOrPhoneExistenceCheck(email, errList, result);
+        return result;
+    }
+
+    private String validateEmailForRow(Row nextRow, List<String> errList, RowEmailPhoneValidation result) {
         String email = "";
-        if (nextRow.getCell(1) != null && nextRow.getCell(1).getCellType() != CellType.BLANK) {
-            email = nextRow.getCell(1).getStringCellValue().trim();
-            if (ValidationUtil.validateEmailPattern(email)) {
-                result.userDetails = new HashMap<>();
-                Map<String, Object> filters = new HashMap<>();
-                filters.put(Constants.EMAIL, email);
-                result.isEmailValid = this.verifyUserRecordExists(filters, result.userDetails);
-            } else {
-                errList.add("The Email provided in Invalid");
-            }
+        if (nextRow.getCell(1) == null || nextRow.getCell(1).getCellType() == CellType.BLANK) {
+            return email;
         }
+        email = nextRow.getCell(1).getStringCellValue().trim();
+        if (!ValidationUtil.validateEmailPattern(email)) {
+            errList.add("The Email provided in Invalid");
+            return email;
+        }
+        result.userDetails = new HashMap<>();
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.EMAIL, email);
+        result.isEmailValid = this.verifyUserRecordExists(filters, result.userDetails);
+        return email;
+    }
+
+    private void validatePhoneForRow(Row nextRow, List<String> errList, RowEmailPhoneValidation result) {
         String phoneNumber = null;
-        if (nextRow.getCell(2) != null && nextRow.getCell(2).getCellType() != CellType.BLANK) {
-            if (nextRow.getCell(2).getCellType() == CellType.NUMERIC) {
-                phoneNumber = NumberToTextConverter.toText(nextRow.getCell(2).getNumericCellValue());
-            } else if (nextRow.getCell(2).getCellType() == CellType.STRING) {
-                phoneNumber = nextRow.getCell(2).getStringCellValue().trim();
-            } else {
-                errList.add("Invalid Value of Mobile Number. Expecting number/string format");
-            }
-        } else {
+        if (nextRow.getCell(2) == null || nextRow.getCell(2).getCellType() == CellType.BLANK) {
             errList.add("Mobile Number is Missing");
+        } else if (nextRow.getCell(2).getCellType() == CellType.NUMERIC) {
+            phoneNumber = NumberToTextConverter.toText(nextRow.getCell(2).getNumericCellValue());
+        } else if (nextRow.getCell(2).getCellType() == CellType.STRING) {
+            phoneNumber = nextRow.getCell(2).getStringCellValue().trim();
+        } else {
+            errList.add("Invalid Value of Mobile Number. Expecting number/string format");
         }
         result.phoneNumber = phoneNumber;
-        if (StringUtils.hasLength(phoneNumber)) {
-            boolean isValidPhoneNumber = ValidationUtil.validateContactPattern(phoneNumber);
-            if (isValidPhoneNumber) {
-                Map<String, Object> userDetailsForMobile = new HashMap<>();
-                Map<String, Object> filters = new HashMap<>();
-                filters.put(Constants.PHONE, phoneNumber);
-                result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
-            } else {
-                errList.add("The Mobile Number provided is Invalid");
-            }
+        if (!StringUtils.hasLength(phoneNumber)) {
+            return;
         }
-        if (StringUtils.hasLength(phoneNumber) && result.isEmailValid) {
-            Map<String, Object> filters = new HashMap<>();
-            filters.put(Constants.EMAIL, email);
-            filters.put(Constants.PHONE, phoneNumber);
-            result.isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, result.userDetails);
+        boolean isValidPhoneNumber = ValidationUtil.validateContactPattern(phoneNumber);
+        if (!isValidPhoneNumber) {
+            errList.add("The Mobile Number provided is Invalid");
+            return;
         }
-        return result;
+        Map<String, Object> userDetailsForMobile = new HashMap<>();
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.PHONE, phoneNumber);
+        result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
+    }
+
+    private void applyEmailOrPhoneExistenceCheck(String email, List<String> errList, RowEmailPhoneValidation result) {
+        if (!(StringUtils.hasLength(result.phoneNumber) && result.isEmailValid)) {
+            return;
+        }
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.EMAIL, email);
+        filters.put(Constants.PHONE, result.phoneNumber);
+        result.isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, result.userDetails);
     }
 
     private boolean hasExistenceOrOrgError(RowEmailPhoneValidation validation, HashMap<String, String> inputDataMap, List<String> errList) {
@@ -304,34 +318,47 @@ public class UserBulkUploadService {
             return userRecordUpdate;
         }
         for (WfStatusEntity wfStatusEntity : userPendingRequest) {
-            String updateValuesString = wfStatusEntity.getUpdateFieldValues();
-            List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
-            Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
-            for (Map.Entry<String, String> entry : toValue.entrySet()) {
-                if (!valuesToBeUpdate.containsKey(entry.getKey())) {
-                    continue;
-                }
-                WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
-                if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))) {
-                    wfStatusEntity.setCurrentStatus(Constants.APPROVED);
-                } else {
-                    wfStatusEntity.setCurrentStatus(Constants.REJECTED);
-                }
-                wfStatusEntity.setInWorkflow(false);
-                wfStatusRepo.save(wfStatusEntity);
-                if (Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
-                    userProfileWfService.updateUserProfile(wfRequest);
-                    WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
-                    if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
-                        userRecordUpdate = false;
-                        this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
-                    } else {
-                        statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
-                    }
-                    valuesToBeUpdate.remove(entry.getKey());
-                }
-            }
+            userRecordUpdate = applyPendingRequestForStatus(wfStatusEntity, valuesToBeUpdate, str, statusCell, errorDetails, userRecordUpdate);
         }
+        return userRecordUpdate;
+    }
+
+    private boolean applyPendingRequestForStatus(WfStatusEntity wfStatusEntity, Map<String, Object> valuesToBeUpdate, StringBuilder str,
+            Cell statusCell, Cell errorDetails, boolean userRecordUpdate) throws IOException {
+        String updateValuesString = wfStatusEntity.getUpdateFieldValues();
+        List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
+        Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
+        for (Map.Entry<String, String> entry : toValue.entrySet()) {
+            if (!valuesToBeUpdate.containsKey(entry.getKey())) {
+                continue;
+            }
+            userRecordUpdate = applyPendingEntryUpdate(wfStatusEntity, entry, valuesToBeUpdate, str, statusCell, errorDetails, userRecordUpdate);
+        }
+        return userRecordUpdate;
+    }
+
+    private boolean applyPendingEntryUpdate(WfStatusEntity wfStatusEntity, Map.Entry<String, String> entry, Map<String, Object> valuesToBeUpdate,
+            StringBuilder str, Cell statusCell, Cell errorDetails, boolean userRecordUpdate) throws IOException {
+        WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
+        if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))) {
+            wfStatusEntity.setCurrentStatus(Constants.APPROVED);
+        } else {
+            wfStatusEntity.setCurrentStatus(Constants.REJECTED);
+        }
+        wfStatusEntity.setInWorkflow(false);
+        wfStatusRepo.save(wfStatusEntity);
+        if (!Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus()) || wfRequest == null) {
+            return userRecordUpdate;
+        }
+        userProfileWfService.updateUserProfile(wfRequest);
+        WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
+        if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
+            this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
+            valuesToBeUpdate.remove(entry.getKey());
+            return false;
+        }
+        statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
+        valuesToBeUpdate.remove(entry.getKey());
         return userRecordUpdate;
     }
 
@@ -381,6 +408,9 @@ public class UserBulkUploadService {
 
     private boolean applyProfileUpdateForRow(WfRequest wfRequest, boolean userRecordUpdate) {
         userProfileWfService.updateUserProfileForBulkUpload(wfRequest);
+        if (wfRequest == null) {
+            return userRecordUpdate;
+        }
         WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
         if (null != wfStatusEntityFailed && Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
             return false;
@@ -731,7 +761,6 @@ public class UserBulkUploadService {
                 }
             }
         } catch (Exception e) {
-            logger.error("Exception while fetching user details : ",e);
             throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
         }
         return false;
@@ -821,7 +850,7 @@ public class UserBulkUploadService {
     public void processBulkUploadV1(Map<String, String> inputDataMap) throws IOException {
         File file = null;
         try {
-            file = new File(Constants.LOCAL_BASE_PATH + inputDataMap.get(Constants.FILE_NAME));
+            file = new File(configuration.getLocalBasePath() + inputDataMap.get(Constants.FILE_NAME));
             if (file.exists() && file.length() > 0) {
                 processBulkUploadV1File(file, inputDataMap);
             } else {
@@ -934,52 +963,67 @@ public class UserBulkUploadService {
         result.phone = phone;
         boolean emailExists = email != null && !email.isEmpty();
         boolean phoneExists = phone != null && !phone.isEmpty();
-        if (!emailExists && !phoneExists) {
-            errList.add("Both Email and Mobile number are mandatory");
-        } else {
-            if (!emailExists) {
-                errList.add("Email is missing");
-            }
-            if (!phoneExists) {
-                errList.add("Mobile number is missing");
-            }
-        }
-        Map<String, Object> userDetailsForMobile = null;
-        Map<String, Object> userDetailsForMobileAndEmail = null;
-        Map<String, Object> filters = null;
-        Map<String, Object> userDetails = null;
-        // Validate email
-        if (emailExists) {
-            if (ValidationUtil.validateEmailPattern(email)) {
-                userDetails = new HashMap<>();
-                filters = new HashMap<>();
-                filters.put(Constants.EMAIL, email);
-                result.isEmailValid = this.verifyUserRecordExists(filters, userDetails);
-            } else {
-                errList.add("Invalid Email format");
-            }
-        }
+        validateEmailAndPhonePresenceV1(emailExists, phoneExists, errList);
 
-        // Validate phone
-        if (phoneExists) {
-            if (ValidationUtil.validateContactPattern(phone)) {
-                userDetailsForMobile = new HashMap<>();
-                filters = new HashMap<>();
-                filters.put(Constants.PHONE, phone);
-                result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
-            } else {
-                errList.add("Invalid Phone number format");
-            }
-        }
-        if (StringUtils.hasLength(phone) && result.isEmailValid) {
-            userDetailsForMobileAndEmail = new HashMap<>();
-            filters = new HashMap<>();
-            filters.put(Constants.EMAIL, email);
-            filters.put(Constants.PHONE, phone);
-            result.isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, userDetailsForMobileAndEmail);
-        }
+        Map<String, Object> userDetails = validateEmailFieldV1(email, emailExists, errList, result);
+        validatePhoneFieldV1(phone, phoneExists, errList, result);
+        applyEmailOrPhoneExistenceCheckV1(email, phone, errList, result);
+
         result.userDetails = userDetails;
         return result;
+    }
+
+    private void validateEmailAndPhonePresenceV1(boolean emailExists, boolean phoneExists, List<String> errList) {
+        if (!emailExists && !phoneExists) {
+            errList.add("Both Email and Mobile number are mandatory");
+            return;
+        }
+        if (!emailExists) {
+            errList.add("Email is missing");
+        }
+        if (!phoneExists) {
+            errList.add("Mobile number is missing");
+        }
+    }
+
+    private Map<String, Object> validateEmailFieldV1(String email, boolean emailExists, List<String> errList, EmailPhoneValidation result) {
+        if (!emailExists) {
+            return null;
+        }
+        if (!ValidationUtil.validateEmailPattern(email)) {
+            errList.add("Invalid Email format");
+            return null;
+        }
+        Map<String, Object> userDetails = new HashMap<>();
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.EMAIL, email);
+        result.isEmailValid = this.verifyUserRecordExists(filters, userDetails);
+        return userDetails;
+    }
+
+    private void validatePhoneFieldV1(String phone, boolean phoneExists, List<String> errList, EmailPhoneValidation result) {
+        if (!phoneExists) {
+            return;
+        }
+        if (!ValidationUtil.validateContactPattern(phone)) {
+            errList.add("Invalid Phone number format");
+            return;
+        }
+        Map<String, Object> userDetailsForMobile = new HashMap<>();
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.PHONE, phone);
+        result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
+    }
+
+    private void applyEmailOrPhoneExistenceCheckV1(String email, String phone, List<String> errList, EmailPhoneValidation result) {
+        if (!(StringUtils.hasLength(phone) && result.isEmailValid)) {
+            return;
+        }
+        Map<String, Object> userDetailsForMobileAndEmail = new HashMap<>();
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.EMAIL, email);
+        filters.put(Constants.PHONE, phone);
+        result.isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, userDetailsForMobileAndEmail);
     }
 
     private boolean applyPendingRequestUpdatesV1(String userId, Map<String, Object> valuesToBeUpdate, Map<String, Object> csvValues) throws IOException {
@@ -989,47 +1033,55 @@ public class UserBulkUploadService {
             return userRecordUpdate;
         }
         for (WfStatusEntity wfStatusEntity : userPendingRequest) {
-            String updateValuesString = wfStatusEntity.getUpdateFieldValues();
-            List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
-            Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
-            for (Map.Entry<String, String> entry : toValue.entrySet()) {
-                if (!valuesToBeUpdate.containsKey(entry.getKey())) {
-                    continue;
-                }
-                WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
-                if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))) {
-                    wfStatusEntity.setCurrentStatus(Constants.APPROVED);
-                } else {
-                    wfStatusEntity.setCurrentStatus(Constants.REJECTED);
-                }
-                wfStatusEntity.setInWorkflow(false);
-                wfStatusRepo.save(wfStatusEntity);
-                if (Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
-                    userProfileWfService.updateUserProfile(wfRequest);
-                    WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
-                    if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
-                        userRecordUpdate = false;
-                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
-                        csvValues.put(Constants.ERROR_DETAILS, Constants.UPDATE_FAILED);
-                    } else {
-                        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.SUCCESSFUL_UPERCASE);
-                    }
-                    valuesToBeUpdate.remove(entry.getKey());
-                }
-            }
+            userRecordUpdate = applyPendingRequestForStatusV1(wfStatusEntity, valuesToBeUpdate, csvValues, userRecordUpdate);
         }
+        return userRecordUpdate;
+    }
+
+    private boolean applyPendingRequestForStatusV1(WfStatusEntity wfStatusEntity, Map<String, Object> valuesToBeUpdate,
+            Map<String, Object> csvValues, boolean userRecordUpdate) throws IOException {
+        String updateValuesString = wfStatusEntity.getUpdateFieldValues();
+        List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
+        Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
+        for (Map.Entry<String, String> entry : toValue.entrySet()) {
+            if (!valuesToBeUpdate.containsKey(entry.getKey())) {
+                continue;
+            }
+            userRecordUpdate = applyPendingEntryUpdateV1(wfStatusEntity, entry, valuesToBeUpdate, csvValues, userRecordUpdate);
+        }
+        return userRecordUpdate;
+    }
+
+    private boolean applyPendingEntryUpdateV1(WfStatusEntity wfStatusEntity, Map.Entry<String, String> entry,
+            Map<String, Object> valuesToBeUpdate, Map<String, Object> csvValues, boolean userRecordUpdate) throws IOException {
+        WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
+        if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))) {
+            wfStatusEntity.setCurrentStatus(Constants.APPROVED);
+        } else {
+            wfStatusEntity.setCurrentStatus(Constants.REJECTED);
+        }
+        wfStatusEntity.setInWorkflow(false);
+        wfStatusRepo.save(wfStatusEntity);
+        if (!Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus()) || wfRequest == null) {
+            return userRecordUpdate;
+        }
+        userProfileWfService.updateUserProfile(wfRequest);
+        WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
+        if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
+            csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.FAILED_UPPERCASE);
+            csvValues.put(Constants.ERROR_DETAILS, Constants.UPDATE_FAILED);
+            valuesToBeUpdate.remove(entry.getKey());
+            return false;
+        }
+        csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.SUCCESSFUL_UPERCASE);
+        valuesToBeUpdate.remove(entry.getKey());
         return userRecordUpdate;
     }
 
     private void processSingleRecordV1(CSVRecord csvRecord, List<String> headers, Map<String, String> inputDataMap,
             String tagsDelimiter, List<Map<String, Object>> updatedRecords, BulkUploadCounters counters) throws IOException {
         if (csvRecord.size() > headers.size() - 2) {
-            Map<String, Object> errorRecord = new LinkedHashMap<>(csvRecord.toMap());
-            errorRecord.put(Constants.STATUS_BULK_UPLOAD, "FAILED");
-            errorRecord.put(Constants.ERROR_DETAILS, "Number of fields in the record exceeds expected number. Please check your data.");
-            updatedRecords.add(errorRecord);
-            counters.totalRecordsCount++;
-            counters.failedRecordsCount++;
+            recordOversizedRowV1(csvRecord, updatedRecords, counters);
             return;
         }
         long startTime = System.currentTimeMillis();
@@ -1044,6 +1096,48 @@ public class UserBulkUploadService {
             recordFailureV1(csvValues, errList, tagsDelimiter, updatedRecords, counters);
             return;
         }
+        if (checkExistenceOrOrgErrorV1(epValidation, inputDataMap, errList, csvValues, tagsDelimiter, updatedRecords, counters)) {
+            return;
+        }
+
+        populateValuesToBeUpdateV1(csvRecord, valuesToBeUpdate, errList, epValidation, tagsDelimiter);
+
+        if (!CollectionUtils.isEmpty(errList)) {
+            recordFailureV1(csvValues, errList, tagsDelimiter, updatedRecords, counters);
+            return;
+        }
+
+        String userId = CollectionUtils.isEmpty(epValidation.userDetails) ? null : (String) epValidation.userDetails.get(Constants.USER_ID);
+        logger.info("userId {}", userId);
+
+        boolean userRecordUpdate = applyPendingRequestUpdatesV1(userId, valuesToBeUpdate, csvValues);
+
+        if (valuesToBeUpdate.isEmpty()) {
+            finalizeRecordWithoutProfileUpdateV1(userRecordUpdate, csvValues, updatedRecords, counters);
+            return;
+        }
+
+        if (!updateBulkUserProfile(userId, valuesToBeUpdate)) {
+            userRecordUpdate = false;
+        }
+
+        finalizeRecordWithProfileUpdateV1(userRecordUpdate, csvValues, counters);
+        long duration = System.currentTimeMillis() - startTime;
+        logger.info("UserBulkUploadService:: Record Completed. Time taken: {} milli-seconds", duration);
+        updatedRecords.add(csvValues);
+    }
+
+    private void recordOversizedRowV1(CSVRecord csvRecord, List<Map<String, Object>> updatedRecords, BulkUploadCounters counters) {
+        Map<String, Object> errorRecord = new LinkedHashMap<>(csvRecord.toMap());
+        errorRecord.put(Constants.STATUS_BULK_UPLOAD, "FAILED");
+        errorRecord.put(Constants.ERROR_DETAILS, "Number of fields in the record exceeds expected number. Please check your data.");
+        updatedRecords.add(errorRecord);
+        counters.totalRecordsCount++;
+        counters.failedRecordsCount++;
+    }
+
+    private boolean checkExistenceOrOrgErrorV1(EmailPhoneValidation epValidation, Map<String, String> inputDataMap, List<String> errList,
+            Map<String, Object> csvValues, String tagsDelimiter, List<Map<String, Object>> updatedRecords, BulkUploadCounters counters) {
         if (!epValidation.isEmailValid) {
             errList.add("User record does not exist with given email");
         } else if (!epValidation.isEmailOrPhoneNumberExist && epValidation.isPhoneNumberValid) {
@@ -1059,16 +1153,18 @@ public class UserBulkUploadService {
                 counters.failedRecordsCount++;
                 counters.totalRecordsCount++;
                 updatedRecords.add(csvValues);
-                return;
+                return true;
             }
         }
-
         if (!CollectionUtils.isEmpty(errList)) {
             recordFailureV1(csvValues, errList, tagsDelimiter, updatedRecords, counters);
-            return;
+            return true;
         }
+        return false;
+    }
 
-        // Validate and update fields
+    private void populateValuesToBeUpdateV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList,
+            EmailPhoneValidation epValidation, String tagsDelimiter) {
         validateFullNameColumnV1(csvRecord, valuesToBeUpdate, errList);
         validateGroupColumnV1(csvRecord, valuesToBeUpdate, errList);
 
@@ -1085,40 +1181,20 @@ public class UserBulkUploadService {
         validateExternalSystemIdColumnV1(csvRecord, valuesToBeUpdate, errList);
         validateExternalSystemColumnV1(csvRecord, valuesToBeUpdate, errList);
         validateTagColumnV1(csvRecord, valuesToBeUpdate, errList, tagsDelimiter);
+    }
 
-        if (!CollectionUtils.isEmpty(errList)) {
-            String statusValue = errList.isEmpty() ? Constants.SUCCESSFUL_UPERCASE : Constants.FAILED_UPPERCASE;
-            csvValues.put(Constants.STATUS_BULK_UPLOAD, statusValue);
-            csvValues.put(Constants.ERROR_DETAILS, errList.isEmpty() ? "" : String.join(tagsDelimiter, errList));
+    private void finalizeRecordWithoutProfileUpdateV1(boolean userRecordUpdate, Map<String, Object> csvValues,
+            List<Map<String, Object>> updatedRecords, BulkUploadCounters counters) {
+        if (userRecordUpdate) {
+            counters.noOfSuccessfulRecords++;
+        } else {
             counters.failedRecordsCount++;
-            counters.totalRecordsCount++;
-            updatedRecords.add(csvValues);
-            return;
         }
+        counters.totalRecordsCount++;
+        updatedRecords.add(csvValues);
+    }
 
-        String userId = null;
-        if (!CollectionUtils.isEmpty(epValidation.userDetails)) {
-            userId = (String) epValidation.userDetails.get(Constants.USER_ID);
-        }
-        logger.info("userId {}", userId);
-
-        boolean userRecordUpdate = applyPendingRequestUpdatesV1(userId, valuesToBeUpdate, csvValues);
-
-        if (valuesToBeUpdate.isEmpty()) {
-            if (userRecordUpdate) {
-                counters.noOfSuccessfulRecords++;
-            } else {
-                counters.failedRecordsCount++;
-            }
-            counters.totalRecordsCount++;
-            updatedRecords.add(csvValues);
-            return;
-        }
-
-        if (!updateBulkUserProfile(userId, valuesToBeUpdate)) {
-            userRecordUpdate = false;
-        }
-
+    private void finalizeRecordWithProfileUpdateV1(boolean userRecordUpdate, Map<String, Object> csvValues, BulkUploadCounters counters) {
         if (userRecordUpdate) {
             counters.noOfSuccessfulRecords++;
             csvValues.put(Constants.STATUS_BULK_UPLOAD, Constants.SUCCESSFUL_UPERCASE);
@@ -1129,9 +1205,6 @@ public class UserBulkUploadService {
             csvValues.put(Constants.ERROR_DETAILS, Constants.UPDATE_FAILED);
         }
         counters.totalRecordsCount++;
-        long duration = System.currentTimeMillis() - startTime;
-        logger.info("UserBulkUploadService:: Record Completed. Time taken: {} milli-seconds", duration);
-        updatedRecords.add(csvValues);
     }
 
     private void validateFullNameColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {

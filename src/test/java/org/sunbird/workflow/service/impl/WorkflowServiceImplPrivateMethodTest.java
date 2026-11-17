@@ -506,7 +506,7 @@ class WorkflowServiceImplPrivateMethodTest {
         String tempDir = System.getProperty("java.io.tmpdir");
         String fileName = "pendingRequest.csv";
         String csvFilePath = tempDir + File.separator + fileName;
-        Path localBasePath = Paths.get(Constants.LOCAL_BASE_PATH);
+        Path localBasePath = Paths.get("/tmp/");
         if (Files.notExists(localBasePath)) {
             Files.createDirectories(localBasePath); // ensure base path exists
         }
@@ -514,6 +514,7 @@ class WorkflowServiceImplPrivateMethodTest {
 
         Files.writeString(Paths.get(csvFilePath), csvContent);
         Files.copy(Paths.get(csvFilePath), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
         int size = 42;
 

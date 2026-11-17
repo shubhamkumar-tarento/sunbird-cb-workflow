@@ -108,6 +108,7 @@ class UserBulkUploadService3Test {
 
         when(configuration.getUserBulkUpdateFolderName()).thenReturn("bulkFolder");
         when(configuration.getWorkflowCloudContainerName()).thenReturn("container");
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
         when(configuration.getGroupValues()).thenReturn(List.of("Group1"));
         when(configuration.getBulkUploadCategoryValue()).thenReturn(List.of("OBC"));
         when(configuration.getBulkUploadGenderValue()).thenReturn(List.of("Male"));
@@ -164,7 +165,7 @@ class UserBulkUploadService3Test {
         inputDataMap.put(Constants.IDENTIFIER, "upload123");
 
         // Put the file in expected local path
-        File localFile = new File(Constants.LOCAL_BASE_PATH + fileName);
+        File localFile = new File("/tmp/" + fileName);
         localFile.getParentFile().mkdirs();
         Files.copy(excelFile.toPath(), localFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
@@ -233,6 +234,7 @@ class UserBulkUploadService3Test {
 
         when(configuration.getUserBulkUpdateFolderName()).thenReturn("bulkFolder");
         when(configuration.getWorkflowCloudContainerName()).thenReturn("container");
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
 // Mock response object and its nested fields
         SBApiResponse mockResponse = mock(SBApiResponse.class);
@@ -275,7 +277,7 @@ class UserBulkUploadService3Test {
         inputDataMap.put(Constants.IDENTIFIER, "upload123");
 
         // Put the file in expected local path
-        File localFile = new File(Constants.LOCAL_BASE_PATH + fileName);
+        File localFile = new File("/tmp/" + fileName);
         localFile.getParentFile().mkdirs();
         Files.copy(excelFile.toPath(), localFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
@@ -345,6 +347,7 @@ class UserBulkUploadService3Test {
 
         when(configuration.getUserBulkUpdateFolderName()).thenReturn("bulkFolder");
         when(configuration.getWorkflowCloudContainerName()).thenReturn("container");
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
 // Mock response object and its nested fields
         SBApiResponse mockResponse = mock(SBApiResponse.class);
@@ -386,7 +389,7 @@ class UserBulkUploadService3Test {
         inputDataMap.put(Constants.IDENTIFIER, "upload123");
 
         // Put the file in expected local path
-        File localFile = new File(Constants.LOCAL_BASE_PATH + fileName);
+        File localFile = new File("/tmp/" + fileName);
         localFile.getParentFile().mkdirs();
         Files.copy(excelFile.toPath(), localFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
@@ -455,6 +458,7 @@ class UserBulkUploadService3Test {
 
         when(configuration.getUserBulkUpdateFolderName()).thenReturn("bulkFolder");
         when(configuration.getWorkflowCloudContainerName()).thenReturn("container");
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
 
 // Mock response object and its nested fields
@@ -496,7 +500,7 @@ class UserBulkUploadService3Test {
         inputDataMap.put(Constants.IDENTIFIER, "upload123");
 
         // Put the file in expected local path
-        File localFile = new File(Constants.LOCAL_BASE_PATH + fileName);
+        File localFile = new File("/tmp/" + fileName);
         localFile.getParentFile().mkdirs();
         Files.copy(excelFile.toPath(), localFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
@@ -578,6 +582,7 @@ class UserBulkUploadService3Test {
 
         when(configuration.getUserBulkUpdateFolderName()).thenReturn("bulkFolder");
         when(configuration.getWorkflowCloudContainerName()).thenReturn("container");
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
 // Mock response object and its nested fields
         SBApiResponse mockResponse = mock(SBApiResponse.class);
@@ -621,7 +626,7 @@ class UserBulkUploadService3Test {
         inputDataMap.put(Constants.IDENTIFIER, "upload123");
 
         // Put the file in expected local path
-        File localFile = new File(Constants.LOCAL_BASE_PATH + fileName);
+        File localFile = new File("/tmp/" + fileName);
         localFile.getParentFile().mkdirs();
         Files.copy(excelFile.toPath(), localFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 

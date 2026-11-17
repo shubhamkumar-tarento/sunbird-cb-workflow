@@ -22,7 +22,7 @@ class WorkflowApplicationTest {
     }
 
     @Test
-    void testRestTemplateBean() throws Exception {
+    void testRestTemplateBean() {
         WorkflowApplication app = new WorkflowApplication();
         RestTemplate restTemplate = app.restTemplate();
 

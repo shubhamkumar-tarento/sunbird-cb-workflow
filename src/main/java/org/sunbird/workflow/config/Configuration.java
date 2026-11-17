@@ -36,6 +36,9 @@ public class Configuration {
     @Value("${lms.service.host}")
     private String lmsServiceHost;
 
+    @Value("${local.base.path:/tmp/}")
+    private String localBasePath;
+
     @Value("${lms.user.search}")
     private String lmsUserSearchEndPoint;
 
@@ -569,6 +572,10 @@ public class Configuration {
 
     public String getLmsServiceHost() {
         return lmsServiceHost;
+    }
+
+    public String getLocalBasePath() {
+        return localBasePath;
     }
 
     public void setLmsServiceHost(String lmsServiceHost) {

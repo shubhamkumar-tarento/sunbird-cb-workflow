@@ -132,10 +132,7 @@ public class WorkflowApplicationConsumer {
                 List<Map<String, Object>> content = (List<Map<String, Object>>) responseMap
                         .get(Constants.CONTENT);
 
-                List<String> roles = findRolesForOrg(content, rootOrgId);
-                if (roles != null) {
-                    return roles;
-                }
+                return findRolesForOrg(content, rootOrgId);
             }
         } catch (Exception e) {
             logger.error("Error fetching roles for userId: {}, error: {}",
@@ -156,13 +153,13 @@ public class WorkflowApplicationConsumer {
 
     private List<String> findRolesForOrg(List<Map<String, Object>> content, String rootOrgId) {
         if (CollectionUtils.isEmpty(content)) {
-            return null;
+            return new ArrayList<>();
         }
         List<Map<String, Object>> organisations = (List<Map<String, Object>>) content
                 .get(0).get(Constants.ORGANISATIONS);
 
         if (CollectionUtils.isEmpty(organisations)) {
-            return null;
+            return new ArrayList<>();
         }
         for (Map<String, Object> org : organisations) {
             if (rootOrgId.equalsIgnoreCase(
@@ -172,6 +169,6 @@ public class WorkflowApplicationConsumer {
                         : new ArrayList<>();
             }
         }
-        return null;
+        return new ArrayList<>();
     }
 }

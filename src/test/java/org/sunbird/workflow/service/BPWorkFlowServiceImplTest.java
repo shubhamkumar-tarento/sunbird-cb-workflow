@@ -87,7 +87,7 @@ class BPWorkFlowServiceImplTest {
     private static final String USER_ID = "user789";
     private static final String ROOT_ORG = "root-org";
     private static final String ORG = "org";
-    private final String ROOT = "root";
+    private final String root = "root";
 
     @Test
     void testGenerateUserApprovalCsv_success() {
@@ -311,7 +311,7 @@ class BPWorkFlowServiceImplTest {
         Map<String, Object> eligibility = new HashMap<>();
         eligibility.put(Constants.COURSEIDS, Arrays.asList(courseId));
 
-        when(elasticsearchServiceManager.readEntity(eq("org_elig_index"), eq("_doc"), eq(orgId))).thenReturn(eligibility);
+        when(elasticsearchServiceManager.readEntity("org_elig_index", "_doc", orgId)).thenReturn(eligibility);
 
         boolean result = (boolean) ReflectionTestUtils.invokeMethod(bpWorkFlowService, "isCourseEligibleForOrg", orgId, courseId);
         assertTrue(result);
@@ -324,7 +324,7 @@ class BPWorkFlowServiceImplTest {
         ReflectionTestUtils.setField(bpWorkFlowService, "orgeligibilityIndex", "org_elig_index");
         ReflectionTestUtils.setField(bpWorkFlowService, "orgeligibilityIndexType", "_doc");
 
-        when(elasticsearchServiceManager.readEntity(eq("org_elig_index"), eq("_doc"), eq(orgId))).thenReturn(Collections.emptyMap());
+        when(elasticsearchServiceManager.readEntity("org_elig_index", "_doc", orgId)).thenReturn(Collections.emptyMap());
 
         boolean result = (boolean) ReflectionTestUtils.invokeMethod(bpWorkFlowService, "isCourseEligibleForOrg", orgId, courseId);
         assertFalse(result);
@@ -1363,7 +1363,7 @@ class BPWorkFlowServiceImplTest {
 
         stubBatchAttributes(3600L, 10, "Batch Conflict");
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-conflict", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-conflict", request).getResult();
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, resp.get(Constants.STATUS));
     }
 
@@ -1379,7 +1379,7 @@ class BPWorkFlowServiceImplTest {
         // use negative offset to simulate past
         stubBatchAttributes(-3600L, 10, "Batch Start Invalid");
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-start", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-start", request).getResult();
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, resp.get(Constants.STATUS));
     }
 
@@ -1394,7 +1394,7 @@ class BPWorkFlowServiceImplTest {
         // batch full -> currentBatchSize equals some limit (simulate full check)
         stubBatchAttributes(3600L, 200, "Batch Full"); // large number to trigger "full" in validation
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-full", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-full", request).getResult();
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, resp.get(Constants.STATUS));
     }
 
@@ -1413,7 +1413,7 @@ class BPWorkFlowServiceImplTest {
         // batch valid
         stubBatchAttributes(3600L, 10, "Batch Exists");
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-exists", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-exists", request).getResult();
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, resp.get(Constants.STATUS));
     }
 
@@ -1430,7 +1430,7 @@ class BPWorkFlowServiceImplTest {
 
         stubBatchAttributes(3600L, 10, "Batch Invalid");
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-invalid", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-invalid", request).getResult();
         assertEquals(HttpStatus.OK, resp.get(Constants.STATUS));
         List<?> data = (List<?>) resp.get(Constants.DATA);
         Map<?, ?> userResp = (Map<?, ?>) data.get(0);
@@ -1440,7 +1440,7 @@ class BPWorkFlowServiceImplTest {
     @Test
     void testNominateUsers_noUserIdsProvided() {
         Map<String, Object> request = buildRequest("course1", "batch1", Collections.emptyList(), "Dept G");
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-req", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-req", request).getResult();
         assertEquals(HttpStatus.BAD_REQUEST, resp.get(Constants.STATUS));
         assertEquals("User list cannot be empty", resp.get(Constants.ERROR_MESSAGE));
     }
@@ -1451,7 +1451,7 @@ class BPWorkFlowServiceImplTest {
         List<String> bigList = new ArrayList<>();
         for (int i = 0; i < 201; i++) bigList.add("u" + i);
         Map<String, Object> request = buildRequest("course1", "batch1", bigList, "Dept H");
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-req", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-req", request).getResult();
         assertEquals(HttpStatus.BAD_REQUEST, resp.get(Constants.STATUS));
         assertEquals("Max 200 users allowed", resp.get(Constants.ERROR_MESSAGE));
     }
@@ -1466,14 +1466,14 @@ class BPWorkFlowServiceImplTest {
         selfProfile.put("role", "SELF");
         when(userUtils.userProfileRead("actor-self")).thenReturn(selfProfile);
 
-        Map<?, ?> resp = bpWorkFlowService.nominateUsers(ROOT, ORG, "actor-self", request).getResult();
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-self", request).getResult();
         assertEquals(HttpStatus.FORBIDDEN, resp.get(Constants.STATUS));
         assertEquals("You do not have permission to nominate users", resp.get(Constants.ERROR_MESSAGE));
     }
 
 
     @Test
-    void testReverseApprovedRequest_updatesRequestAndPersistsEntity() throws Exception {
+    void testReverseApprovedRequest_updatesRequestAndPersistsEntity() {
         WfRequest localWfRequest = new WfRequest();
         localWfRequest.setApplicationId("app123");
         localWfRequest.setWfId("wf123");

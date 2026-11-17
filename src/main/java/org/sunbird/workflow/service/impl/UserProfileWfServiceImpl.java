@@ -252,16 +252,16 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	private static void mergeIntoArrayListLeaf(Map<String, Object> mapRight, Map.Entry<String, Object> entry) {
 		List<Map<String, Object>> childExisting = (List<Map<String, Object>>) entry.getValue();
 		Map<String, Object> childExistingIndex = childExisting.get(0);
-		for (String keys : mapRight.keySet()) {
-			childExistingIndex.put(keys, mapRight.get(keys));
+		for (Map.Entry<String, Object> rightEntry : mapRight.entrySet()) {
+			childExistingIndex.put(rightEntry.getKey(), rightEntry.getValue());
 		}
 	}
 
 	private static void createProfessionalDetailsLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight) {
 		List<Map<String, Object>> professionalData = new ArrayList<>();
 		Map<String, Object> professionalDataChild = new HashMap<>();
-		for (String keys : mapRight.keySet()) {
-			professionalDataChild.put(keys, mapRight.get(keys));
+		for (Map.Entry<String, Object> entry : mapRight.entrySet()) {
+			professionalDataChild.put(entry.getKey(), entry.getValue());
 		}
 		professionalData.add(professionalDataChild);
 		mapLeft.put(Constants.PROFESSIONAL_DETAILS, professionalData);
@@ -276,7 +276,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	public List<Map<String, Object>> enrichUserData(Map<String, List<WfStatusEntity>> wfInfos, String rootOrg) {
 		List<Map<String, Object>> wfDetails = new ArrayList<>();
 		HashMap<String, Object> responseMap;
-		HashMap<String, Object> userResult = new HashMap<>();
+		Map<String, Object> userResult = new HashMap<>();
 		Set<String> userIds = wfInfos.keySet();
 		if (!CollectionUtils.isEmpty(userIds)) {
 			List<String> sources = new ArrayList<>(Constants.USER_DEFAULT_FIELDS);
@@ -294,7 +294,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		return wfDetails;
 	}
 
-	public HashMap<String, Object> getUsersResult(Set<String> userIds) {
+	public Map<String, Object> getUsersResult(Set<String> userIds) {
 		HashMap<String, Object> userResult = new HashMap<>();
 		Map<String, Object> request = getSearchObject(userIds);
 		try {
@@ -306,7 +306,6 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 				populateUserRecord(content, userResult);
 			}
 		} catch (Exception e) {
-			logger.error("Exception while fetching user setails : ",e);
 			throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
 		}
 		return userResult;
@@ -359,8 +358,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		if (null == response){
 			return null;
 		}
-		Map<String, Object> readResponse = mapper.convertValue(response, Map.class);
-		return readResponse;
+		return mapper.convertValue(response, Map.class);
 	}
 
 	private Object migrateUser(WfRequest wfRequest) {
@@ -373,9 +371,8 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		migrateRequestWrapper.put(Constants.SOFT_DELETE_OLD_GROUP, true);
 		migrateRequestWrapper.put(Constants.NOTIFY_MIGRATION, false);
 		migrateRequestObject.put(Constants.REQUEST, migrateRequestWrapper);
-		Map<String, Object> migrateUserApiResp = requestServiceImpl
+		return requestServiceImpl
 				.fetchResultUsingPatch(configuration.getLmsServiceHost() + configuration.getUserProfileMigrateEndPoint(), migrateRequestObject, getHeaders());
-		return migrateUserApiResp;
 	}
 
 	private String migrationUpdate(WfRequest wfRequest) {
@@ -451,21 +448,25 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 
 	private void applyNameAndPhoneUpdates(List<HashMap<String, Object>> valuesToBeUpdate, Map<String, Object> requestWrapper) {
 		for (Map<String, Object> valueToUpdate : valuesToBeUpdate) {
-			if (!valueToUpdate.containsKey(Constants.TO_VALUE)) {
-				continue;
-			}
-			Map<String, Object> toValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
-			Optional<String> firstKey = toValue.keySet().stream().findFirst();
-			if (!firstKey.isPresent()) {
-				continue;
-			}
-			String keyToUpdate = firstKey.get();
-			if (Constants.FIRSTNAME.equalsIgnoreCase(keyToUpdate)) {
-				requestWrapper.put(Constants.FIRST_NAME_CAMEL_CASE, toValue.get(keyToUpdate));
-			}
-			if (Constants.MOBILE.equalsIgnoreCase(keyToUpdate)) {
-				requestWrapper.put(Constants.PHONE, String.valueOf(toValue.get(keyToUpdate)));
-			}
+			applyNameOrPhoneUpdate(valueToUpdate, requestWrapper);
+		}
+	}
+
+	private void applyNameOrPhoneUpdate(Map<String, Object> valueToUpdate, Map<String, Object> requestWrapper) {
+		if (!valueToUpdate.containsKey(Constants.TO_VALUE)) {
+			return;
+		}
+		Map<String, Object> toValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
+		Optional<String> firstKey = toValue.keySet().stream().findFirst();
+		if (!firstKey.isPresent()) {
+			return;
+		}
+		String keyToUpdate = firstKey.get();
+		if (Constants.FIRSTNAME.equalsIgnoreCase(keyToUpdate)) {
+			requestWrapper.put(Constants.FIRST_NAME_CAMEL_CASE, toValue.get(keyToUpdate));
+		}
+		if (Constants.MOBILE.equalsIgnoreCase(keyToUpdate)) {
+			requestWrapper.put(Constants.PHONE, String.valueOf(toValue.get(keyToUpdate)));
 		}
 	}
 
@@ -529,7 +530,6 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 				addPrimaryEmailIfPresent(content, mdoResults);
 			}
 		} catch (Exception e) {
-			logger.error("Exception while fetching user setails : ",e);
 			throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
 		}
 		return mdoResults;

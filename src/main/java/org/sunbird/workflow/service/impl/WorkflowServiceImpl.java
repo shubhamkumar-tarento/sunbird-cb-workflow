@@ -867,7 +867,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 	public WorkFlowModel getWorkFlowConfig(String serviceName) {
 		try {
-			Map<String, Object> wfConfig = new HashMap<>();
+			Map<String, Object> wfConfig;
 			StringBuilder uri = new StringBuilder();
 			switch (serviceName) {
 				case Constants.PROFILE_SERVICE_NAME:
@@ -910,8 +910,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			Map<String, Object> result = (Map<String, Object>) wfConfig.get(Constants.RESULT);
 			Map<String, Object> response = (Map<String, Object>) result.get(Constants.RESPONSE);
 			Map<String,Object> wfStates = mapper.readValue((String) response.get(Constants.VALUE),Map.class);
-			WorkFlowModel workFlowModel = mapper.convertValue(wfStates, new TypeReference<WorkFlowModel>(){});
-			return workFlowModel;
+			return mapper.convertValue(wfStates, new TypeReference<WorkFlowModel>(){});
 		} catch (Exception e) {
 			log.error("Exception occurred while getting work flow config details!");
 			throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
@@ -1152,8 +1151,8 @@ public class WorkflowServiceImpl implements Workflowservice {
 			log.info("starting downloadBulkUploadFile function");
 			headers.add(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
             headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-			Path filePath = Paths.get(String.format("%s/%s", Constants.LOCAL_BASE_PATH, fileName));
-			String strFilePath = Constants.LOCAL_BASE_PATH + fileName;
+			Path filePath = Paths.get(String.format("%s/%s", configuration.getLocalBasePath(), fileName));
+			String strFilePath = configuration.getLocalBasePath() + fileName;
 			File file = new File(strFilePath);
 			InputStreamResource fileStream = new InputStreamResource(new FileInputStream(file));
 			return ResponseEntity.ok()
@@ -1274,7 +1273,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			}
 			userIdSet.clear();
 			collectPendingDesignationOrGroupRequests(pendingRequestsEntityList, allPendingRequest, userIdSet);
-			String csvFilePath = "/tmp/pendingRequest.csv";
+			String csvFilePath = configuration.getLocalBasePath() + "pendingRequest.csv";
 			Map<String, Object> allUserDetails;
 			if (CollectionUtils.isEmpty(userIdSet)) {
 				return this.getNoPendingRequestAvailableResponse(Constants.NO_PENDING_REQUEST_AVAILABLE_MESSAGE);
@@ -1422,7 +1421,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 		if (criteria.getSortBy() != null && !criteria.getSortBy().isEmpty()) {
 			log.info("sortBy invoked {}", userProfiles);
-			userProfiles = sortDataByCriteria(userProfiles, criteria);
+			sortDataByCriteria(userProfiles, criteria);
 		}
 		return userProfiles;
 	}
@@ -1455,7 +1454,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private List<Map<String, Object>> buildEsUserProfilesSortedBySearchScore(List<WfStatusEntity> wfStatusEntities, Map<String, Object> userInfoMap) {
-		List<Map<String, Object>> esUserProfiles = new ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> esUserProfiles = new ArrayList<>();
 		Map<String, List<WfStatusEntity>> wfInfos = wfStatusEntities.stream()
 				.collect(Collectors.groupingBy(WfStatusEntity::getApplicationId));
 
@@ -1574,21 +1573,25 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 	private void populateUserPersonalDetails(List<Map<String, Object>> contents, Map<String, Object> allUserDetails) {
 		for (Map<String, Object> content : contents) {
-			HashMap<String, Object> profileDetails = (HashMap<String, Object>) content.get(Constants.PROFILE_DETAILS);
-			if (CollectionUtils.isEmpty(profileDetails)) {
-				continue;
-			}
-			HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
-					.get(Constants.PERSONAL_DETAILS);
-			if (CollectionUtils.isEmpty(personalDetails)) {
-				continue;
-			}
-			Map<String, Object> userPersonalInfo = new HashMap<>();
-			userPersonalInfo.put(Constants.FIRSTNAME, personalDetails.get(Constants.FIRSTNAME));
-			userPersonalInfo.put(Constants.MOBILE_NUMBER, personalDetails.get(Constants.MOBILE));
-			userPersonalInfo.put(Constants.PRIMARY_EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
-			allUserDetails.put((String) content.get(Constants.USER_ID), userPersonalInfo);
+			populateUserPersonalDetail(content, allUserDetails);
 		}
+	}
+
+	private void populateUserPersonalDetail(Map<String, Object> content, Map<String, Object> allUserDetails) {
+		HashMap<String, Object> profileDetails = (HashMap<String, Object>) content.get(Constants.PROFILE_DETAILS);
+		if (CollectionUtils.isEmpty(profileDetails)) {
+			return;
+		}
+		HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
+				.get(Constants.PERSONAL_DETAILS);
+		if (CollectionUtils.isEmpty(personalDetails)) {
+			return;
+		}
+		Map<String, Object> userPersonalInfo = new HashMap<>();
+		userPersonalInfo.put(Constants.FIRSTNAME, personalDetails.get(Constants.FIRSTNAME));
+		userPersonalInfo.put(Constants.MOBILE_NUMBER, personalDetails.get(Constants.MOBILE));
+		userPersonalInfo.put(Constants.PRIMARY_EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+		allUserDetails.put((String) content.get(Constants.USER_ID), userPersonalInfo);
 	}
 
 	private ResponseEntity<Object> preparePendingRequestFileResponse(String csvFilePath, int size) throws IOException {
@@ -1598,7 +1601,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		headers.put(Constants.COUNT, Collections.singletonList(String.valueOf(size)));
 
 		File file = new File(csvFilePath);
-		Path filePath = Paths.get(String.format("%s/%s", Constants.LOCAL_BASE_PATH, "pendingRequest.csv"));
+		Path filePath = Paths.get(String.format("%s/%s", configuration.getLocalBasePath(), "pendingRequest.csv"));
 		InputStreamResource fileStream = new InputStreamResource(new FileInputStream(file));
 		ResponseEntity<Object> responseEntity =  ResponseEntity.ok()
 				.headers(headers)

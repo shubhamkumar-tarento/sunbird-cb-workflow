@@ -55,7 +55,6 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
 		try {
 			session = createCassandraConnectionWithKeySpaces(null);
 		} catch (Exception e) {
-			logger.error("Error while creating Cassandra connection", e);
 			throw new ProjectCommonException(
 					ResponseCode.INTERNAL_ERROR.getErrorCode(),
 					e.getMessage(),
@@ -128,7 +127,6 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
             }
             return sessionWithKeyspaces;
         } catch (Exception e) {
-            logger.error("Error while creating Cassandra connection", e);
             throw new ProjectCommonException(
                     ResponseCode.INTERNAL_ERROR.getErrorCode(),
                     e.getMessage(),
@@ -171,7 +169,6 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
                         ResponseCode.SERVER_ERROR.getResponseCode());
             }
         } catch (Exception e) {
-            logger.error("Error fetching tables for keyspace: {}", keyspaceName, e);
             throw new ProjectCommonException(
                     ResponseCode.INTERNAL_ERROR.getErrorCode(),
                     "Error fetching tables for keyspace " + keyspaceName + ": " + e.getMessage(),

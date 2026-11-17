@@ -243,7 +243,7 @@ public class Constants {
 	public static final String ORGANIZATION_EXIST_ERROR = "Organization is already registered.";
 	public static final String ORGANIZATION_NAME ="orgName";
 	public static final String BATCH_START_DATE_ERROR = "Batch Start Date Error";
-	public static final String BATCH_SIZE_ERROR = "Batch Size Error";;
+	public static final String BATCH_SIZE_ERROR = "Batch Size Error";
 	public static final String TRUE="True";
 	public static final String ACTIVE = "active";
 	public static final String DESCRIPTION = "description";
@@ -274,7 +274,6 @@ public class Constants {
 	public static final String DOMAIN_REQUEST_ALREADY_PRESENT = "DOMAIN_REQUEST_ALREADY_PRESENT";
 	public static final String DOMAIN_REQUEST_CREATED = "DOMAIN_REQUEST_CREATED";
 	public static final String SEND_FOR_APPROVAL = "SEND_FOR_APPROVAL";
-	public static final String LOCAL_BASE_PATH= "/tmp/";
 	public static final String FILE_NAME = "fileName";
 	public static final String FILE_PATH = "filePath";
 	public static final String DATE_CREATED_ON = "dateCreatedOn";

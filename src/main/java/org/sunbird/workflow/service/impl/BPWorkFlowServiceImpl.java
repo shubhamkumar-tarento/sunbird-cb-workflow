@@ -365,10 +365,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             case Constants.ENROLL_IS_IN_PROGRESS, Constants.ADMIN_ENROLL_IS_IN_PROGRESS:
                 handleEnrollmentRequest(wfRequest);
                 break;
-            case Constants.ONE_STEP_MDO_APPROVAL:
-            case Constants.ONE_STEP_PC_APPROVAL:
-            case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-            case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
+            case Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL,
+                    Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
                 handleApprovalRequest(wfRequest);
                 break;
             default:
@@ -530,7 +528,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             return errMsg;
         }
 
-        if (ObjectUtils.isEmpty(((List<String>) requestBody.get(Constants.COURSE_ID_LIST)))) {
+        if (ObjectUtils.isEmpty(requestBody.get(Constants.COURSE_ID_LIST))) {
             errMsg = "Invalid Request. CourseIdList is empty.";
         }
         return errMsg;
@@ -821,9 +819,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
             // Stream to filter and collect only non-null "endDate" maps
             return list.stream()
-                    .filter(item -> {
-                        return item != null && item.containsKey("end_date") && item.get("end_date") != null;
-                    })
+                    .filter(item -> item != null && item.containsKey("end_date") && item.get("end_date") != null)
                     .toList();
         } else {
             return new ArrayList<>();
@@ -1304,7 +1300,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 .map(String::trim)
                 .toList();
         List<String> missingHeaders = expectedHeaders.stream()
-                .filter(expected -> !actualHeaders.stream().anyMatch(actual -> actual.equalsIgnoreCase(expected)))
+                .filter(expected -> actualHeaders.stream().noneMatch(actual -> actual.equalsIgnoreCase(expected)))
                 .toList();
 
         if (!missingHeaders.isEmpty()) {
@@ -1475,11 +1471,13 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
     }
 
     private String processApprovalStatus(Response response, String wfId) {
+        String rawResponse;
         try {
-            logger.debug("Raw response: {}", mapper.writeValueAsString(response));
+            rawResponse = mapper.writeValueAsString(response);
         } catch (JsonProcessingException e) {
             throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
         }
+        logger.debug("Raw response: {}", rawResponse);
         Map<String, Object> result = response.getResult();
         logger.debug("Extracted result: {}", result);
 
@@ -1656,9 +1654,10 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                         HttpStatus.FORBIDDEN);
             }
 
+            NominationContext nominationContext = new NominationContext(actorUserId, batchId, programId, deptName,
+                    wfApproveType, primaryCategory, incomingRole, rootOrg, org);
             for (String userId : userIds) {
-                processedUsers.add(nominateSingleUser(userId, actorUserId, batchId, programId, deptName,
-                        wfApproveType, primaryCategory, incomingRole, rootOrg, org));
+                processedUsers.add(nominateSingleUser(userId, nominationContext));
             }
 
             response.put(Constants.MESSAGE, "Nomination workflow processing complete");
@@ -1671,27 +1670,30 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         }
     }
 
-    private Map<String, Object> nominateSingleUser(String userId, String actorUserId, String batchId, String programId,
-            String deptName, String wfApproveType, String primaryCategory, String incomingRole, String rootOrg, String org) {
+    private record NominationContext(String actorUserId, String batchId, String programId, String deptName,
+            String wfApproveType, String primaryCategory, String incomingRole, String rootOrg, String org) {
+    }
+
+    private Map<String, Object> nominateSingleUser(String userId, NominationContext context) {
         Map<String, Object> userResponse = new HashMap<>();
         userResponse.put("userId", userId);
 
-        List<WfStatusEntity> activeRequests = wfStatusRepo.findActiveWorkflows(batchId, userId, Boolean.TRUE);
+        List<WfStatusEntity> activeRequests = wfStatusRepo.findActiveWorkflows(context.batchId(), userId, Boolean.TRUE);
         if (CollectionUtils.isNotEmpty(activeRequests)
-                && isBlockedByActiveWorkflow(activeRequests, incomingRole, userId, userResponse)) {
+                && isBlockedByActiveWorkflow(activeRequests, context.incomingRole(), userId, userResponse)) {
             return userResponse;
         }
 
         WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId(batchId);
-        wfRequest.setCourseId(programId);
+        wfRequest.setApplicationId(context.batchId());
+        wfRequest.setCourseId(context.programId());
         wfRequest.setUserId(userId);
-        wfRequest.setActorUserId(actorUserId);
-        wfRequest.setDeptName(deptName);
-        wfRequest.setServiceName(wfApproveType);
+        wfRequest.setActorUserId(context.actorUserId());
+        wfRequest.setDeptName(context.deptName());
+        wfRequest.setServiceName(context.wfApproveType());
         wfRequest.setUpdateFieldValues(buildUpdateFieldValuesWithFirstName(userId));
 
-        switch (wfApproveType) {
+        switch (context.wfApproveType()) {
             case Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
                 wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
                 wfRequest.setAction(Constants.APPROVE);
@@ -1703,14 +1705,14 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 break;
 
             default:
-                logger.warn("Invalid wfApproveType: {}", wfApproveType);
+                logger.warn("Invalid wfApproveType: {}", context.wfApproveType());
                 userResponse.put(Constants.STATUS, Constants.INVALID_APPROVAL_TYPE);
                 return userResponse;
         }
 
         Map<String, Object> batchDetailsMap = new HashMap<>();
-        if (StringUtils.isNotEmpty(primaryCategory)) {
-            batchDetailsMap.put(Constants.PRIMARY_CATEGORY, primaryCategory);
+        if (StringUtils.isNotEmpty(context.primaryCategory())) {
+            batchDetailsMap.put(Constants.PRIMARY_CATEGORY, context.primaryCategory());
         }
         String validationError = validateBatchUserRequestAccess(wfRequest, batchDetailsMap);
         wfRequest.setBatchName((String) batchDetailsMap.get(Constants.BATCH_NAME));
@@ -1721,7 +1723,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             return userResponse;
         }
 
-        if (CollectionUtils.isNotEmpty(getActiveEnrollmentForUserAndCourse(userId, programId))) {
+        if (CollectionUtils.isNotEmpty(getActiveEnrollmentForUserAndCourse(userId, context.programId()))) {
             userResponse.put(Constants.STATUS, Constants.ALREADY_EXISTS);
             return userResponse;
         }
@@ -1731,7 +1733,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             return userResponse;
         }
 
-        WfStatusEntity entity = persistApprovedStateDirectly(wfRequest, rootOrg, org);
+        WfStatusEntity entity = persistApprovedStateDirectly(wfRequest, context.rootOrg(), context.org());
         wfRequest.setWfId(entity.getWfId());
         try {
             producer.push(configuration.getWorkFlowNotificationTopic(), wfRequest);

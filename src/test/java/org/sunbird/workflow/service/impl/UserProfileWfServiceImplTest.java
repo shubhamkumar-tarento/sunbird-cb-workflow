@@ -291,7 +291,7 @@ class UserProfileWfServiceImplTest {
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(apiResp);
 
-        HashMap<String, Object> userResult = userProfileWfServiceImpl.getUsersResult(userIds);
+        Map<String, Object> userResult = userProfileWfServiceImpl.getUsersResult(userIds);
 
         assertTrue(userResult.containsKey("u1"));
     }

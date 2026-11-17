@@ -210,7 +210,7 @@ public class NotificationServiceImpl {
 				Constants.TWO_STEP_MDO_AND_PC_APPROVAL,
 				Constants.TWO_STEP_PC_AND_MDO_APPROVAL));
 		Set<String> usersId = buildNotificationUserIds(wfRequest, wfStatusEntity, blendedProgrammeServiceNames);
-		HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(usersId);
+		Map<String, Object> usersObj = userProfileWfService.getUsersResult(usersId);
 		Map<String, Object> senderInfo = (Map<String, Object>)usersObj.get(wfRequest.getUserId());
 		Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
 		MailContent mailContent = buildMailContent(wfRequest, wfStatusEntity, blendedProgrammeServiceNames, updatedFieldValue);
@@ -306,7 +306,7 @@ public class NotificationServiceImpl {
 
 	private Map<String, Object> buildMdoAdminNotificationParams(WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
 		Map<String, Object> params = new HashMap<>();
-		HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
+		Map<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
 		Map<String, Object> recipientInfo = (Map<String, Object>) usersObj.get(wfStatusEntity.getUserId());
 		params.put(Constants.USER_NAME, recipientInfo.get(Constants.FIRST_NAME));
 		Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
@@ -321,7 +321,7 @@ public class NotificationServiceImpl {
 		return params;
 	}
 
-	private void sendMdoAdminNotification(WfRequest wfRequest, WfStatusEntity wfStatusEntity) throws IOException {
+	private void sendMdoAdminNotification(WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
 		if (!Boolean.TRUE.equals(wfStatus.getNotificationEnable())
@@ -375,7 +375,7 @@ public class NotificationServiceImpl {
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
 
-		HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
+		Map<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
 		Map<String, Object> recipientInfo = (Map<String, Object>) usersObj.get(wfStatusEntity.getUserId());
 		String userName = (String) recipientInfo.get(Constants.FIRST_NAME);
 		String userRootOrgId = (String) recipientInfo.get(Constants.ROOT_ORG_ID);
@@ -556,7 +556,7 @@ public class NotificationServiceImpl {
 			request.setMode(Constants.EMAIL);
 			Template template = new Template();
 			template.setId(configuration.getOrgChangeNotificationTemplate());
-			HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
+			Map<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
 			Map<String, Object> recipientInfo = (Map<String, Object>) usersObj.get(wfRequest.getUserId());
 			String username = (String) recipientInfo.get(Constants.FIRST_NAME);
 			params.put(Constants.USER_NAME, username);
@@ -653,7 +653,7 @@ public class NotificationServiceImpl {
 			return;
 		}
 
-		HashMap<String, Object> usersObj = userProfileWfService
+		Map<String, Object> usersObj = userProfileWfService
 				.getUsersResult(Collections.singleton(wfRequest.getUserId()));
 		Map<String, Object> userInfo = (Map<String, Object>) usersObj
 				.get(wfRequest.getUserId());
@@ -688,13 +688,13 @@ public class NotificationServiceImpl {
 	private void sendNotificationToAiAssessmentUser(
 			WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
 
-		HashMap<String, Object> usersObj = userProfileWfService
+		Map<String, Object> usersObj = userProfileWfService
 				.getUsersResult(Collections.singleton(wfRequest.getUserId()));
 		Map<String, Object> userInfo = (Map<String, Object>) usersObj
 				.get(wfRequest.getUserId());
 		String userName = (String) userInfo.get(Constants.FIRST_NAME);
 
-		HashMap<String, Object> approverObj = userProfileWfService
+		Map<String, Object> approverObj = userProfileWfService
 				.getUsersResult(Collections.singleton(wfRequest.getActorUserId()));
 		Map<String, Object> approverInfo = (Map<String, Object>) approverObj
 				.get(wfRequest.getActorUserId());

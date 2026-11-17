@@ -82,9 +82,10 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
                         .orElse(null);
 
                 if (StringUtils.hasLength(serviceName)) {
+                    WfTransitionContext transitionContext = new WfTransitionContext(rootOrg, org, modifiedBy, role, userToken);
                     for (Map.Entry<String, List<WfRequest>> entry : wfRequestsGroupedByUserId.entrySet()) {
-                        processWfRequestsForUser(rootOrg, org, entry.getKey(), entry.getValue(),
-                                modifiedBy, role, userToken, serviceName, data);
+                        processWfRequestsForUser(transitionContext, entry.getKey(), entry.getValue(),
+                                serviceName, data);
                     }
                     handlePostWorkflowNotification(wfRequestList.get(0));
                     response.put(Constants.MESSAGE, Constants.SUCCESS);
@@ -103,25 +104,28 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
         return response;
     }
 
-    private void processWfRequestsForUser(String rootOrg, String org, String userId, List<WfRequest> wfRequests,
-            String modifiedBy, String role, String userToken, String serviceName, List<Object> data) {
+    private record WfTransitionContext(String rootOrg, String org, String modifiedBy, String role, String userToken) {
+    }
+
+    private void processWfRequestsForUser(WfTransitionContext context, String userId, List<WfRequest> wfRequests,
+            String serviceName, List<Object> data) {
         logger.info("Processing workflow requests for userId: {}", userId);
 
         List<Object> wfRequestsForEvent = new ArrayList<>();
         for (WfRequest wfRequest : wfRequests) {
             logger.debug("Processing workflow request with wfId: {}", wfRequest.getWfId());
-            if (processSingleWfRequestForEvent(rootOrg, org, wfRequest, modifiedBy, role, userToken, wfRequestsForEvent, data)) {
+            if (processSingleWfRequestForEvent(context, wfRequest, wfRequestsForEvent, data)) {
                 break;
             }
         }
         if (!CollectionUtils.isEmpty(wfRequestsForEvent)) {
-            pushWorkflowEvents(serviceName, userId, wfRequestsForEvent, userToken);
+            pushWorkflowEvents(serviceName, userId, wfRequestsForEvent, context.userToken());
         }
         logger.info("Completed workflowTransition successfully for userId: {}", userId);
     }
 
-    private boolean processSingleWfRequestForEvent(String rootOrg, String org, WfRequest wfRequest, String modifiedBy,
-            String role, String userToken, List<Object> wfRequestsForEvent, List<Object> data) {
+    private boolean processSingleWfRequestForEvent(WfTransitionContext context, WfRequest wfRequest,
+            List<Object> wfRequestsForEvent, List<Object> data) {
         Map<String, Object> responseData = new HashMap<>();
         try {
             if (StringUtils.hasLength(wfRequest.getServiceName())) {
@@ -131,9 +135,12 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
                     logger.warn("Same Profile approval request is already in workflow for request ID: {}", wfRequest.getWfId());
                     return true;
                 }
-                Map<String, String> changeStatusResponse = changeStatus(rootOrg, org, wfRequest, modifiedBy, role, userToken);
+                Map<String, String> changeStatusResponse = changeStatus(context.rootOrg(), context.org(), wfRequest,
+                        context.modifiedBy(), context.role(), context.userToken());
                 String changedStatus = changeStatusResponse.get(Constants.STATUS);
-                logger.info("Changed status to '{}' for workflow ID: {}", changedStatus, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
+                if (logger.isInfoEnabled()) {
+                    logger.info("Changed status to '{}' for workflow ID: {}", changedStatus, changeStatusResponse.get(Constants.WF_ID_CONSTANT));
+                }
 
                 responseData.put(Constants.STATUS, changedStatus);
                 responseData.put(Constants.WF_ID_CONSTANT, changeStatusResponse.get(Constants.WF_ID_CONSTANT));

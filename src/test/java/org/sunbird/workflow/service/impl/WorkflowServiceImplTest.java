@@ -1217,12 +1217,13 @@ class WorkflowServiceImplTest {
         String fileName = "testFile.txt";
         String fileContent = "Hello World!";
 
-        Path targetPath = Paths.get(Constants.LOCAL_BASE_PATH, fileName);
+        Path targetPath = Paths.get("/tmp/", fileName);
         Path parentPath = targetPath.getParent();
         if (parentPath != null && Files.notExists(parentPath)) {
             Files.createDirectories(parentPath);
         }
         Files.write(targetPath, fileContent.getBytes());
+        when(configuration.getLocalBasePath()).thenReturn("/tmp/");
 
         // Act
         ResponseEntity<InputStreamResource> response =

@@ -83,7 +83,7 @@ public class StorageServiceImpl implements StorageService {
         SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_FILE_DOWNLOAD);
         try {
             String objectKey = configuration.getUserBulkUpdateFolderName() + "/" + fileName;
-            storageService.download(configuration.getWorkflowCloudContainerName(), objectKey, Constants.LOCAL_BASE_PATH,
+            storageService.download(configuration.getWorkflowCloudContainerName(), objectKey, configuration.getLocalBasePath(),
                     Option.apply(Boolean.FALSE));
             return response;
         } catch (Exception e) {

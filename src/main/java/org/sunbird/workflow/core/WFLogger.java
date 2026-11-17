@@ -30,6 +30,9 @@ public class WFLogger {
 	}
 
 	public void error(Exception exception) {
+		if (!logger.isErrorEnabled()) {
+			return;
+		}
 		ObjectMapper ow = new ObjectMapper();
 		// log the exception
 		try {
@@ -45,6 +48,9 @@ public class WFLogger {
 	}
 
 	public void fatal(Exception exception) {
+		if (!logger.isFatalEnabled()) {
+			return;
+		}
 		ObjectMapper ow = new ObjectMapper();
 		// log the exception
 		try {
