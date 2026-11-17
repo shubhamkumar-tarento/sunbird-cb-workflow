@@ -1,10 +1,11 @@
 package org.sunbird.workflow.utils;
 
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.*;
 
 public class CryptoUtil {
-    private static final Charset US_ASCII = Charset.forName("US-ASCII");
+    private static final Charset US_ASCII = StandardCharsets.US_ASCII;
 
     private CryptoUtil() {
     }

@@ -8,6 +8,7 @@ import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.service.ContentReadService;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,9 +51,9 @@ public class ContentReadServiceImpl implements ContentReadService {
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the Org details : " + e);
+            logger.info("There is a error occured while searching for the Org details : {}", e);
         }
-        return null;
+        return Collections.emptyMap();
     }
 
     public String getRootOrgId(String courseId) {

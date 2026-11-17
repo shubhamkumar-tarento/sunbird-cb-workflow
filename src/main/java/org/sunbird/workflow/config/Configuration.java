@@ -519,10 +519,6 @@ public class Configuration {
         this.multipleWfCreationEnable = multipleWfCreationEnable;
     }
 
-    public boolean isMultipleWfCreationEnable() {
-        return multipleWfCreationEnable;
-    }
-
     public String getNotifyServiceHost() {
         return notifyServiceHost;
     }

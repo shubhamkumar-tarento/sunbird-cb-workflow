@@ -230,7 +230,6 @@ class ConfigurationTest {
 
         // Validate boolean getters
         assertTrue(config.getMultipleWfCreationEnable());
-        assertTrue(config.isMultipleWfCreationEnable());
     }
 
     @Test

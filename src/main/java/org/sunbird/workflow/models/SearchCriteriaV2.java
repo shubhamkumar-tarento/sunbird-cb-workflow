@@ -1,6 +1,5 @@
 package org.sunbird.workflow.models;
 
-import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -53,7 +52,7 @@ public class SearchCriteriaV2 {
 	}
 
 	public boolean isEmpty() {
-		return (StringUtils.isEmpty(this.applicationStatus) && StringUtils.isEmpty(this.serviceName));
+		return (this.applicationStatus == null && this.serviceName == null);
 	}
 
 	public List<String> getApplicationIds() {

@@ -126,8 +126,8 @@ public class ElasticsearchServiceManager {
             SearchResponse searchResponse = client.search(searchRequest, RequestOptions.DEFAULT);
 
             for (SearchHit hit : searchResponse.getHits().getHits()) {
-                Map<String, Object> record = mapSearchHitToUserRecord(hit);
-                userInfo.put((String) record.get(Constants.ID), record);
+                Map<String, Object> userRecord = mapSearchHitToUserRecord(hit);
+                userInfo.put((String) userRecord.get(Constants.ID), userRecord);
             }
             totalHits = searchResponse.getHits().getTotalHits();
         } catch (IOException e) {
@@ -180,26 +180,26 @@ public class ElasticsearchServiceManager {
     }
 
     private Map<String, Object> mapSearchHitToUserRecord(SearchHit hit) {
-        Map<String, Object> sourceMap = (Map<String, Object>) hit.getSourceAsMap();
-        Map<String, Object> record = new HashMap<>();
-        record.put(Constants.ID, sourceMap.get(Constants.ID));
-        record.put(Constants.UUID, sourceMap.get(Constants.ID));
-        record.put(Constants.ROOT_ORG_ID, sourceMap.get(Constants.ROOT_ORG_ID));
-        record.put(Constants.SEARCH_SCORE, hit.getScore());
+        Map<String, Object> sourceMap = hit.getSourceAsMap();
+        Map<String, Object> userRecord = new HashMap<>();
+        userRecord.put(Constants.ID, sourceMap.get(Constants.ID));
+        userRecord.put(Constants.UUID, sourceMap.get(Constants.ID));
+        userRecord.put(Constants.ROOT_ORG_ID, sourceMap.get(Constants.ROOT_ORG_ID));
+        userRecord.put(Constants.SEARCH_SCORE, hit.getScore());
         HashMap<String, Object> profileDetails = (HashMap<String, Object>) sourceMap
                 .get(Constants.PROFILE_DETAILS);
         if (MapUtils.isNotEmpty(profileDetails)) {
             HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
                     .get(Constants.PERSONAL_DETAILS);
-            record.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
-            record.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+            userRecord.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
+            userRecord.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
             Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails
                     .get(Constants.ADDITIONAL_PROPERTIES);
             if (MapUtils.isNotEmpty(additionalProperties)) {
-                record.put(Constants.TAG, additionalProperties.get(Constants.TAG));
+                userRecord.put(Constants.TAG, additionalProperties.get(Constants.TAG));
             }
         }
-        return record;
+        return userRecord;
     }
 
     public boolean updateWfRequest(String userId, String uuid, boolean append) {

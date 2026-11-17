@@ -15,13 +15,6 @@ class InvalidDataInputExceptionTest {
 
         assertEquals(code, ex.getCode());
         assertArrayEquals(params, ex.getParams());
-
-        // Set new values to test setters
-        ex.setCode("ERR_NEW");
-        ex.setParams(new Object[]{"newParam"});
-
-        assertEquals("ERR_NEW", ex.getCode());
-        assertArrayEquals(new Object[]{"newParam"}, ex.getParams());
     }
 
     @Test

@@ -54,7 +54,9 @@ public class ApplicationProcessingConsumer {
         WfRequest wfRequest = null;
         try {
             wfRequest = mapper.readValue(strData, WfRequest.class);
-            logger.info("Recevied data in user profile consumer : {}", mapper.writeValueAsString(wfRequest));
+            if (logger.isInfoEnabled()) {
+                logger.info("Recevied data in user profile consumer : {}", mapper.writeValueAsString(wfRequest));
+            }
         } catch (Exception ex) {
             logger.error("Error while deserialization the object value", ex);
         }

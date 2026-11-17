@@ -15,7 +15,7 @@ package org.sunbird.workflow.utils;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Utilities for encoding and decoding the Base64 representation of
@@ -155,12 +155,7 @@ public class Base64Util {
      *              adheres to RFC 2045.
      */
     public static String encodeToString(byte[] input, int flags) {
-        try {
-            return new String(encode(input, flags), "US-ASCII");
-        } catch (UnsupportedEncodingException e) {
-            // US-ASCII is guaranteed to be available.
-            throw new AssertionError(e);
-        }
+        return new String(encode(input, flags), StandardCharsets.US_ASCII);
     }
 
     //  --------------------------------------------------------
@@ -180,12 +175,7 @@ public class Base64Util {
      *               adheres to RFC 2045.
      */
     public static String encodeToString(byte[] input, int offset, int len, int flags) {
-        try {
-            return new String(encode(input, offset, len, flags), "US-ASCII");
-        } catch (UnsupportedEncodingException e) {
-            // US-ASCII is guaranteed to be available.
-            throw new AssertionError(e);
-        }
+        return new String(encode(input, offset, len, flags), StandardCharsets.US_ASCII);
     }
 
     /**
@@ -220,7 +210,7 @@ public class Base64Util {
         int output_len = len / 3 * 4;
 
         // Account for the tail of the data and the padding bytes, if any.
-        if (encoder.do_padding) {
+        if (encoder.doPadding) {
             if (len % 3 > 0) {
                 output_len += 4;
             }
@@ -240,9 +230,9 @@ public class Base64Util {
         }
 
         // Account for the newlines, if any.
-        if (encoder.do_newline && len > 0) {
+        if (encoder.doNewline && len > 0) {
             output_len += (((len - 1) / (3 * Encoder.LINE_GROUPS)) + 1) *
-                    (encoder.do_cr ? 2 : 1);
+                    (encoder.doCr ? 2 : 1);
         }
 
         encoder.output = new byte[output_len];
@@ -284,7 +274,7 @@ public class Base64Util {
          * Lookup table for turning bytes into their position in the
          * Base64 alphabet.
          */
-        private static final int DECODE[] = {
+        private static final int[] DECODE = {
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63,
@@ -307,7 +297,7 @@ public class Base64Util {
          * Decode lookup table for the "web safe" variant (RFC 3548
          * sec. 4) where - and _ replace + and /.
          */
-        private static final int DECODE_WEBSAFE[] = {
+        private static final int[] DECODE_WEBSAFE = {
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1,
@@ -331,7 +321,7 @@ public class Base64Util {
          */
         private static final int SKIP = -1;
         private static final int EQUALS = -2;
-        final private int[] alphabet;
+        private final int[] alphabet;
         /**
          * States 0-3 are reading through the next input tuple.
          * State 4 is having read one '=' and expecting exactly
@@ -515,9 +505,10 @@ public class Base64Util {
                 case 0:
                     // Output length is a multiple of three.  Fine.
                     break;
-                case 1:
-                    // Read one extra input byte, which isn't enough to
+                case 1, 4:
+                    // case 1: Read one extra input byte, which isn't enough to
                     // make another output byte.  Illegal.
+                    // case 4: Read one padding '=' when we expected 2.  Illegal.
                     this.state = 6;
                     return false;
                 case 2:
@@ -531,10 +522,6 @@ public class Base64Util {
                     output[op++] = (byte) (value >> 10);
                     output[op++] = (byte) (value >> 2);
                     break;
-                case 4:
-                    // Read one padding '=' when we expected 2.  Illegal.
-                    this.state = 6;
-                    return false;
                 case 5:
                     // Read all the padding '='s we expected and no more.
                     // Fine.
@@ -561,7 +548,7 @@ public class Base64Util {
          * Lookup table for turning Base64 alphabet positions (6 bits)
          * into output bytes.
          */
-        private static final byte ENCODE[] = {
+        private static final byte[] ENCODE = {
                 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
                 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
                 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
@@ -572,32 +559,32 @@ public class Base64Util {
          * Lookup table for turning Base64 alphabet positions (6 bits)
          * into output bytes.
          */
-        private static final byte ENCODE_WEBSAFE[] = {
+        private static final byte[] ENCODE_WEBSAFE = {
                 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
                 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
                 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
                 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '_',
         };
-        final public boolean do_padding;
-        final public boolean do_newline;
-        final public boolean do_cr;
-        final private byte[] tail;
-        final private byte[] alphabet;
+        public final boolean doPadding;
+        public final boolean doNewline;
+        public final boolean doCr;
+        private final byte[] tail;
+        private final byte[] alphabet;
         /* package */ int tailLen;
         private int count;
 
         public Encoder(int flags, byte[] output) {
             this.output = output;
 
-            do_padding = (flags & NO_PADDING) == 0;
-            do_newline = (flags & NO_WRAP) == 0;
-            do_cr = (flags & CRLF) != 0;
+            doPadding = (flags & NO_PADDING) == 0;
+            doNewline = (flags & NO_WRAP) == 0;
+            doCr = (flags & CRLF) != 0;
             alphabet = ((flags & URL_SAFE) == 0) ? ENCODE : ENCODE_WEBSAFE;
 
             tail = new byte[2];
             tailLen = 0;
 
-            count = do_newline ? LINE_GROUPS : -1;
+            count = doNewline ? LINE_GROUPS : -1;
         }
 
         /**
@@ -637,7 +624,6 @@ public class Base64Util {
                                 (input[p++] & 0xff);
                         tailLen = 0;
                     }
-                    ;
                     break;
 
                 case 2:
@@ -660,7 +646,7 @@ public class Base64Util {
                 output[op++] = alphabet[(v >> 6) & 0x3f];
                 output[op++] = alphabet[v & 0x3f];
                 if (--count == 0) {
-                    if (do_cr) output[op++] = '\r';
+                    if (doCr) output[op++] = '\r';
                     output[op++] = '\n';
                     count = LINE_GROUPS;
                 }
@@ -682,7 +668,7 @@ public class Base64Util {
                 p += 3;
                 op += 4;
                 if (--count == 0) {
-                    if (do_cr) output[op++] = '\r';
+                    if (doCr) output[op++] = '\r';
                     output[op++] = '\n';
                     count = LINE_GROUPS;
                 }
@@ -700,12 +686,12 @@ public class Base64Util {
                     tailLen -= t;
                     output[op++] = alphabet[(v >> 6) & 0x3f];
                     output[op++] = alphabet[v & 0x3f];
-                    if (do_padding) {
+                    if (doPadding) {
                         output[op++] = '=';
                         output[op++] = '=';
                     }
-                    if (do_newline) {
-                        if (do_cr) output[op++] = '\r';
+                    if (doNewline) {
+                        if (doCr) output[op++] = '\r';
                         output[op++] = '\n';
                     }
                 } else if (p - tailLen == len - 2) {
@@ -716,15 +702,15 @@ public class Base64Util {
                     output[op++] = alphabet[(v >> 12) & 0x3f];
                     output[op++] = alphabet[(v >> 6) & 0x3f];
                     output[op++] = alphabet[v & 0x3f];
-                    if (do_padding) {
+                    if (doPadding) {
                         output[op++] = '=';
                     }
-                    if (do_newline) {
-                        if (do_cr) output[op++] = '\r';
+                    if (doNewline) {
+                        if (doCr) output[op++] = '\r';
                         output[op++] = '\n';
                     }
-                } else if (do_newline && op > 0 && count != LINE_GROUPS) {
-                    if (do_cr) output[op++] = '\r';
+                } else if (doNewline && op > 0 && count != LINE_GROUPS) {
+                    if (doCr) output[op++] = '\r';
                     output[op++] = '\n';
                 }
 

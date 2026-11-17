@@ -32,7 +32,7 @@ public class ApplicationProcessingServiceImplV2 {
     private final BPWorkFlowService bpWorkFlowService;
     private final DomainWhiteListWorkFlowService domainWhiteListWorkFlowService;
 
-    Logger logger = LogManager.getLogger(ApplicationProcessingServiceImpl.class);
+    Logger logger = LogManager.getLogger(ApplicationProcessingServiceImplV2.class);
 
     public void processWfApplicationRequest(List<WfRequest> wfRequests, String serviceName, String userId, String userToken) {
         switch (serviceName) {
@@ -41,13 +41,13 @@ public class ApplicationProcessingServiceImplV2 {
                 userProfileWfService.updateUserProfileV2(wfRequests, userId, userToken);
                 break;
             case Constants.USER_REGISTRATION_SERVICE_NAME:
-                wfRequests.forEach(wfRequest -> userRegService.processMessage(wfRequest));
+                wfRequests.forEach(userRegService::processMessage);
                 break;
             case Constants.DOMAIN:
-                wfRequests.forEach(wfRequest -> domainWhiteListWorkFlowService.processDomainRequest(wfRequest));
+                wfRequests.forEach(domainWhiteListWorkFlowService::processDomainRequest);
                 break;
             case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
-                wfRequests.forEach(wfRequest -> bpWorkFlowService.processWFRequest(wfRequest));
+                wfRequests.forEach(bpWorkFlowService::processWFRequest);
                 break;
             default:
                 break;
@@ -84,7 +84,7 @@ public class ApplicationProcessingServiceImplV2 {
         });
     }
 
-    public void updateUserDepartment(String rootOrg, String org, String wid, HashMap<String, Object> departmentInfo) {
+    public void updateUserDepartment(String rootOrg, String org, String wid, Map<String, Object> departmentInfo) {
         StringBuilder builder = new StringBuilder();
         builder.append(configuration.getLexCoreServiceHost()).append(configuration.getDepartmentUpdatePath());
         try {

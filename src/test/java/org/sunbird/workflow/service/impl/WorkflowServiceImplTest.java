@@ -128,7 +128,7 @@ class WorkflowServiceImplTest {
     @Test
     void appsSearchV2_shouldReturnGroupedInfos() {
         criteriaV2 = new SearchCriteriaV2();
-        Response response = workflowServiceImpl.appsSearchV2("rootOrg", criteriaV2);
+        Response response = workflowServiceImpl.appsSearchV2(criteriaV2);
         assertEquals(Constants.SUCCESSFUL, response.get(Constants.MESSAGE));
         assertTrue(response.get(Constants.DATA) instanceof Map);
     }
@@ -519,7 +519,7 @@ class WorkflowServiceImplTest {
 
         when(wfStatusRepo.findByStatusAndAppIds(anyList(), anyList())).thenReturn(wfStatusEntities);
 
-        Response response = workflowServiceImpl.appsSearchV2("rootOrg", criteriaV2);
+        Response response = workflowServiceImpl.appsSearchV2(criteriaV2);
 
         assertNotNull(response);
         assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
@@ -543,7 +543,7 @@ class WorkflowServiceImplTest {
 
         when(wfStatusRepo.findByStatusAndDeptAndAppIds(anyList(), anyList(), anyList())).thenReturn(wfStatusEntities);
 
-        Response response = workflowServiceImpl.appsSearchV2("rootOrg", criteriaV2);
+        Response response = workflowServiceImpl.appsSearchV2(criteriaV2);
 
         assertNotNull(response);
         assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
@@ -639,7 +639,7 @@ class WorkflowServiceImplTest {
         when(configuration.getMaxLimit()).thenReturn(50);
         when(configuration.getDefaultOffset()).thenReturn(0);
 
-        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup("rootOrg", criteriaV1, true);
+        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup(criteriaV1, true);
 
         assertNotNull(response);
     }
@@ -656,7 +656,7 @@ class WorkflowServiceImplTest {
         when(configuration.getDefaultOffset()).thenReturn(0);
         when(wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationIdIn(any(), any(), any())).thenReturn(mockWfList("app1", "u1"));
 
-        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup("rootOrg", criteriaV1);
+        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup(criteriaV1);
 
         assertNotNull(response);
     }
@@ -698,7 +698,7 @@ class WorkflowServiceImplTest {
         when(emptyCriteria.isEmpty()).thenReturn(true);
 
         Exception ex = assertThrows(BadRequestException.class, () -> {
-            workflowServiceImpl.applicationSearchOnApplicationIdGroup("rootOrg", emptyCriteria);
+            workflowServiceImpl.applicationSearchOnApplicationIdGroup(emptyCriteria);
         });
         assertTrue(ex.getMessage().contains(Constants.SEARCH_CRITERIA_VALIDATION));
     }

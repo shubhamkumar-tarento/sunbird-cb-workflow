@@ -113,12 +113,10 @@ public class StorageServiceImpl implements StorageService {
             response.setResponseCode(HttpStatus.INTERNAL_SERVER_ERROR);
             return response;
         } finally {
-            if (file != null) {
-                try {
-                    Files.delete(file.toPath());
-                } catch (IOException e) {
-                    logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
-                }
+            try {
+                Files.delete(file.toPath());
+            } catch (IOException e) {
+                logger.warn("Failed to delete temp file: {}", file.getAbsolutePath(), e);
             }
         }
     }

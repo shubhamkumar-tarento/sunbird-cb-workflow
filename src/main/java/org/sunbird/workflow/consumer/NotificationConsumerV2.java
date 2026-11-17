@@ -29,7 +29,7 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class NotificationConsumerV2 {
 
-    Logger logger = LogManager.getLogger(NotificationConsumer.class);
+    Logger logger = LogManager.getLogger(NotificationConsumerV2.class);
 
     private final ObjectMapper mapper;
     private final NotificationServiceImpl notificationService;
@@ -71,7 +71,7 @@ public class NotificationConsumerV2 {
                     });
                     break;
                 case Constants.POSITION_SERVICE_NAME, Constants.DOMAIN_SERVICE_NAME, Constants.ORGANISATION_SERVICE_NAME:
-                    wfRequests.forEach(wfRequest -> notificationService.sendEmailNotification(wfRequest));
+                    wfRequests.forEach(notificationService::sendEmailNotification);
                     break;
                 case Constants.BLENDED_PROGRAM_SERVICE_NAME, Constants.ONE_STEP_MDO_APPROVAL, Constants.ONE_STEP_PC_APPROVAL, Constants.TWO_STEP_MDO_AND_PC_APPROVAL, Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
                     wfRequests.forEach(wfRequest -> {

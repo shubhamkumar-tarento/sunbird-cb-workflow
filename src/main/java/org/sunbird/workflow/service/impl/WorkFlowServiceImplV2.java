@@ -406,7 +406,7 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
         WfStatusEntity savedEntity = wfStatusRepo.save(applicationStatus);
         String userId = savedEntity.getUserId();
 
-        if (Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(applicationStatus.getRequestType()) && nextWfStatus.getIsLastState()) {
+        if (Constants.ORG_TRANSFER_REQUEST.equalsIgnoreCase(applicationStatus.getRequestType()) && Boolean.TRUE.equals(nextWfStatus.getIsLastState())) {
             autoCompleteGroupDesignationAfterTransfer(applicationStatus, wfRequest, nextState, inWorkflow, currentTime, userId, userToken);
         }
     }
@@ -580,9 +580,8 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
             Map<String, Object> result = (Map<String, Object>) wfConfig.get(Constants.RESULT);
             Map<String, Object> response = (Map<String, Object>) result.get(Constants.RESPONSE);
             Map<String, Object> wfStates = mapper.readValue((String) response.get(Constants.VALUE), Map.class);
-            WorkFlowModel workFlowModel = mapper.convertValue(wfStates, new TypeReference<WorkFlowModel>() {
+            return mapper.convertValue(wfStates, new TypeReference<WorkFlowModel>() {
             });
-            return workFlowModel;
         } catch (Exception e) {
             logger.error("Exception occurred while getting work flow config details!");
             throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);

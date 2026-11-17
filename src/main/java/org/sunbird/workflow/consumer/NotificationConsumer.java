@@ -58,15 +58,15 @@ public class NotificationConsumer {
 		WfRequest wfRequest = null;
 		try {
 			wfRequest = mapper.readValue(strData, WfRequest.class);
-			logger.info("Recevied data in notification consumer : {}", mapper.writeValueAsString(wfRequest));
+			if (logger.isInfoEnabled()) {
+				logger.info("Recevied data in notification consumer : {}", mapper.writeValueAsString(wfRequest));
+			}
 			switch (wfRequest.getServiceName()) {
 				case Constants.PROFILE_SERVICE_NAME:
 					notificationService.sendNotification(wfRequest);
 					notificationService.sendNotificationToMdoAdmin(wfRequest);
 					break;
-				case Constants.POSITION_SERVICE_NAME:
-				case Constants.DOMAIN_SERVICE_NAME:
-				case Constants.ORGANISATION_SERVICE_NAME:
+				case Constants.POSITION_SERVICE_NAME, Constants.DOMAIN_SERVICE_NAME, Constants.ORGANISATION_SERVICE_NAME:
 					notificationService.sendEmailNotification(wfRequest);
 					break;
 				case Constants.BLENDED_PROGRAM_SERVICE_NAME:

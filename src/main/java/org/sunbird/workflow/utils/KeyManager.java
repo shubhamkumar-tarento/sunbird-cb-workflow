@@ -34,7 +34,7 @@ public class KeyManager {
     String basePath = propertiesCache.getProperty(Constants.ACCESS_TOKEN_PUBLICKEY_BASEPATH);
     try (Stream<Path> walk = Files.walk(Paths.get(basePath))) {
       List<String> result =
-              walk.filter(Files::isRegularFile).map(x -> x.toString()).toList();
+              walk.filter(Files::isRegularFile).map(Path::toString).toList();
       result.forEach(
               file -> {
                 try {
@@ -66,9 +66,9 @@ public class KeyManager {
     publicKey = stripLineBreaks(publicKey);
     byte[] keyBytes = Base64Util.decode(publicKey.getBytes(StandardCharsets.UTF_8), Base64Util.DEFAULT);
 
-    X509EncodedKeySpec X509publicKey = new X509EncodedKeySpec(keyBytes);
+    X509EncodedKeySpec x509PublicKey = new X509EncodedKeySpec(keyBytes);
     KeyFactory kf = KeyFactory.getInstance("RSA");
-    return kf.generatePublic(X509publicKey);
+    return kf.generatePublic(x509PublicKey);
   }
 
   /**

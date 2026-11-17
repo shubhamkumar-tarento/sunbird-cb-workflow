@@ -24,11 +24,7 @@ public class ProjectUtil {
 
 	static Logger logger = LogManager.getLogger(ProjectUtil.class);
 
-	public static PropertiesCache propertiesCache;
-
-	static {
-		propertiesCache = PropertiesCache.getInstance();
-	}
+	private static final PropertiesCache propertiesCache = PropertiesCache.getInstance();
 
 	public static String getConfigValue(String key) {
 		if (StringUtils.isNotBlank(System.getenv(key))) {

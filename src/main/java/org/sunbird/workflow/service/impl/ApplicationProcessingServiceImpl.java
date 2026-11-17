@@ -65,7 +65,7 @@ public class ApplicationProcessingServiceImpl {
 					HashMap<String, Object> fromValue = (HashMap<String, Object>) updatedValues.get("fromValue");
 					HashMap<String, Object> toValue = (HashMap<String, Object>) updatedValues.get("toValue");
 					String key = toValue.entrySet().iterator().next().getKey();
-					if (!StringUtils.isEmpty(key) && key.equals("name")) {
+					if (StringUtils.hasLength(key) && key.equals("name")) {
 						String newDeptName = (String) toValue.entrySet().iterator().next().getValue();
 						String oldDeptName = (String) fromValue.entrySet().iterator().next().getValue();
 						HashMap<String, Object> departMentInfo = new HashMap<>();
@@ -82,7 +82,7 @@ public class ApplicationProcessingServiceImpl {
 		}
 	}
 
-	public void updateUserDepartment(String rootOrg, String org, String wid, HashMap<String, Object> departMentInfo) {
+	public void updateUserDepartment(String rootOrg, String org, String wid, Map<String, Object> departMentInfo) {
 		StringBuilder builder = new StringBuilder();
 		builder.append(configuration.getLexCoreServiceHost()).append(configuration.getDepartmentUpdatePath());
 		try {

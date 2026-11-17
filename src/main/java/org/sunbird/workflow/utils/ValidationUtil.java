@@ -66,7 +66,7 @@ public class ValidationUtil {
 	}
 
 	public static boolean validateFullName(String firstName) {
-		return firstName.matches("^(?!.*\\n)[a-zA-Z]++(?:['\\s][a-zA-Z]++)*+(?<!\\.|\\s)$");
+		return firstName.matches("^(?!.*\\n)[a-zA-Z]++(?:['\\s][a-zA-Z]++)*+(?<![.\\s])$");
 	}
 
 	public static boolean validateTag(List<String> tags) {
@@ -92,6 +92,6 @@ public class ValidationUtil {
 	}
 
 	public static boolean validatePinCode(String regex) {
-		return regex.matches("^[0-9]{6}$");
+		return regex.matches("^\\d{6}$");
 	}
 }

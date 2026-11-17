@@ -17,17 +17,4 @@ class ProjectCommonExceptionTest {
         assertEquals(message, exception.getMessage());
         assertEquals(responseCode, exception.getResponseCode());
     }
-
-    @Test
-    void testSetters() {
-        ProjectCommonException exception = new ProjectCommonException("CODE", "Message", 500);
-
-        exception.setCode("NEW_CODE");
-        exception.setMessage("New Message");
-        exception.setResponseCode(404);
-
-        assertEquals("NEW_CODE", exception.getCode());
-        assertEquals("New Message", exception.getMessage());
-        assertEquals(404, exception.getResponseCode());
-    }
 }

@@ -3,7 +3,9 @@ package org.sunbird.workflow;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
@@ -32,8 +34,9 @@ public class WorkflowApplication {
 
 		// This will force Jackson to write epoch milliseconds as long for Instant
 		javaTimeModule.addSerializer(Instant.class, new InstantToEpochMillisSerializer());
-		ObjectMapper objectMapper = new ObjectMapper()
-				.configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true);
+		ObjectMapper objectMapper = JsonMapper.builder()
+				.configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, true)
+				.build();
 		objectMapper.registerModule(javaTimeModule);
 		objectMapper.enable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 		return objectMapper;
@@ -47,7 +50,6 @@ public class WorkflowApplication {
 	private ClientHttpRequestFactory getClientHttpRequestFactory() {
 		int timeout = 45000;
 		RequestConfig config = RequestConfig.custom().
-				setConnectTimeout(Timeout.ofMilliseconds(timeout)).
 				setConnectionRequestTimeout(Timeout.ofMilliseconds(timeout)).
 				setResponseTimeout(Timeout.ofMilliseconds(timeout)).
 				build();
@@ -55,6 +57,9 @@ public class WorkflowApplication {
 		PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
 		connectionManager.setMaxTotal(2000);
 		connectionManager.setDefaultMaxPerRoute(500);
+		connectionManager.setDefaultConnectionConfig(ConnectionConfig.custom()
+				.setConnectTimeout(Timeout.ofMilliseconds(timeout))
+				.build());
 
 		CloseableHttpClient client = HttpClients.custom()
 				.setDefaultRequestConfig(config)

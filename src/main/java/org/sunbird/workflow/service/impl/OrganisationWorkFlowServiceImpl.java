@@ -74,20 +74,17 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
 
     @Override
     public Response updateOrgWorkFlow(String rootOrg, String org, WfRequest wfRequest) {
-        Response response = workflowService.workflowTransition(rootOrg, org, wfRequest);
-        return response;
+        return workflowService.workflowTransition(rootOrg, org, wfRequest);
     }
 
     @Override
     public Response readOrgWFApplication(String rootOrg, String org, String wfId, String applicationId) {
-        Response response = workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
-        return response;
+        return workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
     }
 
     @Override
     public Response orgSearch(String rootOrg, String org, SearchCriteria criteria) {
-        Response response = workflowService.applicationsSearch(rootOrg, org, criteria, Constants.ORG_SEARCH_ENABLED);
-        return response;
+        return workflowService.applicationsSearch(rootOrg, org, criteria, Constants.ORG_SEARCH_ENABLED);
     }
 
     /**
@@ -118,7 +115,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the user details : " + e);
+            logger.info("There is a error occured while searching for the user details : {}", e);
         }
         return true;
     }
@@ -144,7 +141,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the Org details : " + e);
+            logger.info("There is a error occured while searching for the Org details : {}", e);
         }
         return true;
     }

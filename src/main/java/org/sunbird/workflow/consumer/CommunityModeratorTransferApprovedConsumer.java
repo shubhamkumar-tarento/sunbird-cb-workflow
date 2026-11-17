@@ -92,7 +92,7 @@ public class CommunityModeratorTransferApprovedConsumer {
             }
 
             for (String communityId : communityIds) {
-                fetchModeratorsAndNotifyMdoLeaders(communityId, wfRequest);
+                fetchModeratorsAndNotifyMdoLeaders(communityId);
             }
 
         } catch (Exception e) {
@@ -100,7 +100,7 @@ public class CommunityModeratorTransferApprovedConsumer {
         }
     }
 
-    private void fetchModeratorsAndNotifyMdoLeaders(String communityId, WfRequest wfRequest) {
+    private void fetchModeratorsAndNotifyMdoLeaders(String communityId) {
         try {
             StringBuilder communityReadUrl = new StringBuilder(configuration.getCommunityServiceBaseUrl())
                     .append(configuration.getCommunityReadEndpoint()).append(communityId);
@@ -117,7 +117,7 @@ public class CommunityModeratorTransferApprovedConsumer {
             if (StringUtils.isNotBlank(orgId)) {
                 List<String> mdoLeaders = userProfileWfService.getMdoAdminAndPCDetails(orgId, Collections.singletonList(Constants.MDO_LEADER));
                 if (!CollectionUtils.isEmpty(mdoLeaders)) {
-                    notificationUtil.sendNotificationToMdoLeader(mdoLeaders, wfRequest, communityName, createdOn, moderators);
+                    notificationUtil.sendNotificationToMdoLeader(mdoLeaders, communityName, createdOn, moderators);
                 } else {
                     logger.info("No MDO admins found for orgId: {}", orgId);
                 }

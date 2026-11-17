@@ -146,8 +146,8 @@ public class CassandraConnectionManagerImpl implements CassandraConnectionManage
         try {
             return DefaultConsistencyLevel.valueOf(consistency.toUpperCase());
         } catch (IllegalArgumentException exception) {
-            logger.info("CassandraConnectionManagerImpl:getConsistencyLevel: Exception occurred with error message = "
-                    + exception.getMessage());
+            logger.info("CassandraConnectionManagerImpl:getConsistencyLevel: Exception occurred with error message = {}",
+                    exception.getMessage());
         }
         return null;
     }

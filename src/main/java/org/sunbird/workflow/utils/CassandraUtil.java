@@ -76,9 +76,7 @@ public final class CassandraUtil {
                     columnsMapping
                             .entrySet()
                             .stream()
-                            .forEach(entry -> {
-                                rowMap.put(entry.getKey(), row.getObject(entry.getValue()));
-                            });
+                            .forEach(entry -> rowMap.put(entry.getKey(), row.getObject(entry.getValue())));
 
                     responseList.put((String) rowMap.get(key), rowMap);
                 });

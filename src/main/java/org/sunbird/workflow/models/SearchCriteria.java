@@ -60,7 +60,7 @@ public class SearchCriteria {
 	}
 
 	public boolean isEmpty() {
-		return (StringUtils.isEmpty(this.applicationStatus) && StringUtils.isEmpty(this.serviceName));
+		return (!StringUtils.hasLength(this.applicationStatus) && !StringUtils.hasLength(this.serviceName));
 	}
 
 	public List<String> getApplicationIds() {

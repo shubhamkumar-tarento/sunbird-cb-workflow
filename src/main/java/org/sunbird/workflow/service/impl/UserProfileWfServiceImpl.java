@@ -77,7 +77,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 			Map<String, Object> readData = (Map<String, Object>) userProfileRead(wfRequest.getApplicationId());
 			if (null == readData || !Constants.OK.equals(readData.get(Constants.RESPONSE_CODE))) {
 				if (null != readData) {
-					logger.error("user not found" + ((Map<String, Object>) readData.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+					logger.error("user not found: {}", ((Map<String, Object>) readData.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
 				} else {
 					logger.error("user not found: no response from profile service");
 				}
@@ -101,7 +101,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 				employmentDetails.put(Constants.DEPARTMENT_NAME, deptNameUpdated);
 			}
 
-			Map<String, Object> updateRequest = updateRequestWithWF(wfRequest.getApplicationId(), wfRequest.getUpdateFieldValues(), profileDetails);
+			Map<String, Object> updateRequest = updateRequestWithWF(wfRequest.getUpdateFieldValues(), profileDetails);
 			if (null == updateRequest) {
 				logger.error("user profile datatype error");
 				failedCase(wfRequest);
@@ -111,7 +111,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 			Map<String, Object> updateUserApiResp = requestServiceImpl
 					.fetchResultUsingPatch(configuration.getLmsServiceHost() + configuration.getUserProfileUpdateEndPoint(), getUpdateRequest(wfRequest, updateRequest), getHeaders());
 			if (null != updateUserApiResp && !Constants.OK.equals(updateUserApiResp.get(Constants.RESPONSE_CODE))) {
-				logger.error("user update failed" + ((Map<String, Object>) updateUserApiResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+				logger.error("user update failed: {}", ((Map<String, Object>) updateUserApiResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
 				failedCase(wfRequest);
 			} else {
 				String cacheKey = Constants.USER_BASIC_PROFILE_REDIS_KEY_PREFIX + existingUserResponse.get(Constants.USER_ID);
@@ -123,7 +123,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		}
 	}
 
-	public Map<String, Object> updateRequestWithWF(String uuid, List<HashMap<String, Object>> wfRequestParamList, Map<String, Object> existingProfileDetail) {
+	public Map<String, Object> updateRequestWithWF(List<HashMap<String, Object>> wfRequestParamList, Map<String, Object> existingProfileDetail) {
 		try {
 			// merge wfRequestParamList and existingProfileDetail to add osid(s)
 			for (Map<String, Object> wfRequestParamObj : wfRequestParamList) {
@@ -149,8 +149,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 						existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), (Boolean) toValueMap.get(Constants.VERIFIED_KARMAYOGI));
 					} else if (Constants.PROFESSIONAL_DETAILS.equalsIgnoreCase((String) wfRequestParamObj.get(Constants.FIELD_KEY))) {
 						List<Map<String, Object>> detailsList = new ArrayList<>();
-						Map<String, Object> detailsMap = new HashMap<>();
-						detailsMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
+						Map<String, Object> detailsMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
 						detailsList.add(detailsMap);
 						existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), detailsList);
 					} else {
@@ -159,12 +158,12 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 					}
 				}
 				Map<String, Object> objectMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
-				for (Map.Entry entry : objectMap.entrySet())
+				for (Map.Entry<String, Object> entry : objectMap.entrySet())
 					updatedProfileElement.put((String) entry.getKey(), entry.getValue());
-				mergeLeaf(existingProfileDetail, updatedProfileElement, wfRequestParamObj.get("fieldKey").toString(), osid);
+				mergeLeaf(existingProfileDetail, updatedProfileElement, wfRequestParamObj.get("fieldKey").toString());
 			}
 		} catch (Exception e) {
-			logger.error("Merge profile exception::{}", e);
+			logger.error("Merge profile exception:: {}", e.getMessage(), e);
 		}
 		updateProfileVerificationStatus(existingProfileDetail);
 		return existingProfileDetail;
@@ -210,7 +209,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		}
 	}
 
-	public static void mergeLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight, String leafKey, String id) {
+	public static void mergeLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight, String leafKey) {
 		if (mapLeft.containsKey(leafKey)) {
 			for (Map.Entry<String, Object> entry : mapLeft.entrySet()) {
 				String key = entry.getKey();
@@ -218,7 +217,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 					Set<String> childRequest = mapRight.keySet();
 					for (String keys : childRequest) {
 						List<Map<String, Object>> childExisting = (List<Map<String, Object>>) entry.getValue();
-						Map<String, Object> childExistingIndex = (Map<String, Object>) childExisting.get(0);
+						Map<String, Object> childExistingIndex = childExisting.get(0);
 						childExistingIndex.put(keys, mapRight.get(keys));
 					}
 				}
@@ -291,22 +290,22 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 						if (MapUtils.isNotEmpty(profileDetails)) {
 							HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
 									.get(Constants.PERSONAL_DETAILS);
-							Map<String, Object> record = new HashMap<>();
+							Map<String, Object> userRecord = new HashMap<>();
 							if (MapUtils.isNotEmpty(personalDetails)) {
-								record.put(Constants.UUID, content.get(Constants.USER_ID));
-								record.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
-								record.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
-								record.put(Constants.ROOT_ORG_ID,content.get(Constants.ROOT_ORG_ID));
-								record.put(Constants.MOBILE, personalDetails.get(Constants.MOBILE));
+								userRecord.put(Constants.UUID, content.get(Constants.USER_ID));
+								userRecord.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
+								userRecord.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+								userRecord.put(Constants.ROOT_ORG_ID,content.get(Constants.ROOT_ORG_ID));
+								userRecord.put(Constants.MOBILE, personalDetails.get(Constants.MOBILE));
 							}
 							if (MapUtils.isNotEmpty(employmentDetails) && StringUtils.isNotBlank((String) employmentDetails.get(Constants.DEPARTMENT_NAME))) {
-								record.put(Constants.DEPARTMENT_NAME, employmentDetails.get(Constants.DEPARTMENT_NAME));
+								userRecord.put(Constants.DEPARTMENT_NAME, employmentDetails.get(Constants.DEPARTMENT_NAME));
 							}
 							Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails.get(Constants.ADDITIONAL_PROPERTIES);
 							if (MapUtils.isNotEmpty(additionalProperties)) {
-								record.put(Constants.TAG, additionalProperties.get(Constants.TAG));
+								userRecord.put(Constants.TAG, additionalProperties.get(Constants.TAG));
 							}
-							userResult.put((String) content.get(Constants.USER_ID), record);
+							userResult.put((String) content.get(Constants.USER_ID), userRecord);
 						}
 					}
 				}
@@ -348,17 +347,10 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	private String migrationUpdate(WfRequest wfRequest) {
 
 		String updatedDeptName = null;
-		String existingDeptName = null;
 		List<HashMap<String, Object>> updatedFieldValues = wfRequest.getUpdateFieldValues();
 		HashMap<String, Object> updatedFieldValueElement = updatedFieldValues.get(0);
 		HashMap<String, Object> toValueList = (HashMap<String, Object>) updatedFieldValueElement.get(Constants.TO_VALUE);
-		HashMap<String, Object> fromValueList = (HashMap<String, Object>) updatedFieldValueElement.get(Constants.FROM_VALUE);
 		String fieldKeyValue = (String) updatedFieldValueElement.get(Constants.FIELD_KEY);
-		for (String key : fromValueList.keySet()) {
-			if (Constants.NAME.equals(key)) {
-				existingDeptName = (String) fromValueList.get(Constants.NAME);
-			}
-		}
 		for (String key : toValueList.keySet()) {
 			if (Constants.NAME.equals(key)) {
 				updatedDeptName = (String) toValueList.get(Constants.NAME);
@@ -368,7 +360,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 			wfRequest.setDeptName(updatedDeptName);
 			Map<String, Object> response = (Map<String, Object>) migrateUser(wfRequest);
 			if (null != response && !Constants.OK.equals(response.get(Constants.RESPONSE_CODE))) {
-				logger.error("Migrate user failed" + ((Map<String, Object>) response.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+				logger.error("Migrate user failed: {}", ((Map<String, Object>) response.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
 				failedCase(wfRequest);
 				return null;
 			} else {
@@ -386,7 +378,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	public boolean assignRole(String sbOrgId, String userId, String userToken) {
 		boolean retValue = false;
 		Map<String, Object> request = new HashMap<>();
-		Map<String, Object> requestBody = new HashMap<String, Object>();
+		Map<String, Object> requestBody = new HashMap<>();
 		requestBody.put(Constants.ORGANIZATION_ID, sbOrgId);
 		requestBody.put(Constants.USER_ID, userId);
 		requestBody.put(Constants.ROLES, Arrays.asList(Constants.PUBLIC));
@@ -538,7 +530,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 			throw new ApplicationException("Can't parse json schema: " + e.getMessage(), e);
 		} catch (ValidationException ex) {
 			StringBuilder result = new StringBuilder("Validation against Json schema failed: \n");
-			ex.getAllMessages().stream().peek(e -> result.append("\n")).forEach(result::append);
+			ex.getAllMessages().forEach(m -> result.append("\n").append(m));
 			logger.info(String.format("Exception : %s", result.toString()));
 			return false;
 		}
@@ -546,7 +538,6 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	}
 
 	public String getVerifiedProfileSchema() {
-		Map<String, String> header = new HashMap<>();
 		Object data = requestServiceImpl
 				.fetchResultUsingGet(new StringBuilder(configuration.getLmsServiceHost() + configuration.getVerifiedProfileFieldsPath()));
 		if (null == data) {
@@ -607,7 +598,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 			if (Constants.NAME.equals(key) && StringUtils.isNotEmpty((String) toValueList.get(Constants.NAME))) {
 				updateProfile(wfRequest, userToken);
 			} else {
-				Map<String, Object> updateRequest = updateRequestWithWF(wfRequest.getUserId(), wfRequest.getUpdateFieldValues(), profileDetails);
+				Map<String, Object> updateRequest = updateRequestWithWF(wfRequest.getUpdateFieldValues(), profileDetails);
 				isUpdateRequired = true;
 				if (updateRequest == null) {
 					logger.error("User profile data type error for request: {}", wfRequest.getWfId());

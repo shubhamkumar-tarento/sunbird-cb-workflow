@@ -109,7 +109,7 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
         if (CollectionUtils.isNotEmpty(domainLookup)) {
             WfStatusEntity wfStatusEntity = wfStatusRepo.findByWfId(domainLookup.get(0).getWfId());
             if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
-                return updateWfRequestAndDomainLookup(response, rootOrg, org, wfRequest, domainValue, 1, domainLookup.get(0));
+                return updateWfRequestAndDomainLookup(rootOrg, org, wfRequest, domainValue, 1, domainLookup.get(0));
             } else {
                 updateWfStatusEntity(wfStatusEntity, userDomainInfoCount.intValue());
                 response.put(Constants.MESSAGE, Constants.DOMAIN_NAME_REQUEST_EXIST_MSG + ": " + domainValue);
@@ -118,7 +118,7 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
             }
             return response;
         }
-        return updateWfRequestAndDomainLookup(response, rootOrg, org, wfRequest, domainValue, 1, new WfDomainLookup());
+        return updateWfRequestAndDomainLookup(rootOrg, org, wfRequest, domainValue, 1, new WfDomainLookup());
     }
 
     private void handleExistingDomainRequest(Response response, String domainValue) {
@@ -139,20 +139,17 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
 
     @Override
     public Response updateDomainWorkFlow(String rootOrg, String org, WfRequest wfRequest) {
-        Response response = workflowService.workflowTransition(rootOrg, org, wfRequest);
-        return response;
+        return workflowService.workflowTransition(rootOrg, org, wfRequest);
     }
 
     @Override
     public Response readDomainWFApplication(String rootOrg, String org, String wfId, String applicationId) {
-        Response response = workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
-        return response;
+        return workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
     }
 
     @Override
     public Response domainSearch(String rootOrg, String org, SearchCriteria criteria) {
-        Response response = applicationSearchOnApplicationIdGroup(criteria, rootOrg);
-        return response;
+        return applicationSearchOnApplicationIdGroup(criteria, rootOrg);
     }
 
     public Response applicationSearchOnApplicationIdGroup(SearchCriteria criteria, String rootOrg) {
@@ -256,11 +253,11 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
         wfStatusRepo.save(wfStatusEntity);
     }
 
-    private Response updateWfRequestAndDomainLookup(Response response, String rootOrg, String org, WfRequest wfRequest, String domainValue, int updatedCountValueForDomainRequest, WfDomainLookup wfDomainLookup) throws JsonProcessingException {
+    private Response updateWfRequestAndDomainLookup(String rootOrg, String org, WfRequest wfRequest, String domainValue, int updatedCountValueForDomainRequest, WfDomainLookup wfDomainLookup) throws JsonProcessingException {
         Response transitionResponse = workflowService.workflowTransition(rootOrg, org, wfRequest);
         if (HttpStatus.OK.compareTo((HttpStatus) transitionResponse.getResult().get(Constants.STATUS)) == 0) {
-            Map<String, Object> dataObject = (Map<String, Object>) transitionResponse.getResult().getOrDefault(Constants.DATA, new HashMap());
-            List<String> wfIdList = (List<String>) dataObject.getOrDefault(Constants.WF_IDS_CONSTANT, new ArrayList());
+            Map<String, Object> dataObject = (Map<String, Object>) transitionResponse.getResult().getOrDefault(Constants.DATA, new HashMap<>());
+            List<String> wfIdList = (List<String>) dataObject.getOrDefault(Constants.WF_IDS_CONSTANT, new ArrayList<>());
             wfDomainLookup.setWfId(wfIdList.get(0));
             wfDomainLookup.setDomainName(domainValue);
             wfDomainLookupRepo.save(wfDomainLookup);
@@ -272,19 +269,11 @@ public class DomainWhiteListWorkFlowServiceImpl implements DomainWhiteListWorkFl
     }
 
     private boolean isApprovedDomains(String emailDomain) {
-        Map<String, Object> propertyMap = new HashMap<>();
-        propertyMap.put(Constants.CONTEXT_TYPE, Constants.USER_REGISTRATION_PRE_APPROVED_DOMAIN);
-        propertyMap.put(Constants.CONTEXT_NAME, emailDomain);
-        List<Map<String, Object>> listOfDomains = cassandraOperation.getRecordsByProperties(
-                Constants.KEYSPACE_SUNBIRD, Constants.TABLE_MASTER_DATA, propertyMap, Arrays.asList(Constants.CONTEXT_TYPE, Constants.CONTEXT_NAME));
-        return CollectionUtils.isNotEmpty(listOfDomains);
+        return isAlreadyApprovedDomains(emailDomain);
     }
 
     private boolean isValidDomain(String emailDomain) {
         Pattern pat = Pattern.compile(configuration.getDomainValidationRegex());
-        if (pat.matcher(emailDomain).matches()) {
-            return true;
-        }
-        return false;
+        return pat.matcher(emailDomain).matches();
     }
 }

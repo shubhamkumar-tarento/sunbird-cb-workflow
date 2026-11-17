@@ -36,12 +36,6 @@ class ResponseCodeTest {
     }
 
     @Test
-    void testGetMessage() {
-        ResponseCode code = ResponseCode.CLIENT_ERROR;
-        assertEquals("", code.getMessage(400)); // always returns empty string
-    }
-
-    @Test
     void testGetResponse_knownUnauthorized() {
         ResponseCode result = ResponseCode.getResponse(Constants.UNAUTHORIZED);
         assertEquals(ResponseCode.UNAUTHORIZED, result);

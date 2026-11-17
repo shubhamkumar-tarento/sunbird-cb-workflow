@@ -25,7 +25,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class ApplicationProcessingConsumerV2 {
 
-    Logger logger = LogManager.getLogger(ApplicationProcessingConsumer.class);
+    Logger logger = LogManager.getLogger(ApplicationProcessingConsumerV2.class);
 
     private final ObjectMapper mapper;
     private final ApplicationProcessingServiceImplV2 applicationProcessingServiceImplV2;
@@ -58,17 +58,7 @@ public class ApplicationProcessingConsumerV2 {
                     new TypeReference<List<WfRequest>>() {
                     });
 
-            try {
-                logger.debug("Processing workflow request for user ID: {}", userId);
-
-                applicationProcessingServiceImplV2.processWfApplicationRequest(wfRequests, serviceName, userId, userToken);
-                applicationProcessingServiceImplV2.updateDepartmentToPortalDBs(wfRequests);
-                createAudit(wfRequests);
-                wfRequests.forEach(wfRequest -> workflowESSyncServiceImpl.syncWithElasticService(wfRequest));
-                logger.debug("Successfully processed workflow request with user ID: {}", userId);
-            } catch (Exception e) {
-                logger.error("Error processing workflow request with wf ID: {}", userId, e);
-            }
+            processWfRequests(wfRequests, serviceName, userId, userToken);
         } catch (IOException e) {
             logger.error("Error deserializing workflow event data: {}", strData, e);
         } catch (ClassCastException e) {
@@ -78,7 +68,21 @@ public class ApplicationProcessingConsumerV2 {
         }
     }
 
+    private void processWfRequests(List<WfRequest> wfRequests, String serviceName, String userId, String userToken) {
+        try {
+            logger.debug("Processing workflow request for user ID: {}", userId);
+
+            applicationProcessingServiceImplV2.processWfApplicationRequest(wfRequests, serviceName, userId, userToken);
+            applicationProcessingServiceImplV2.updateDepartmentToPortalDBs(wfRequests);
+            createAudit(wfRequests);
+            wfRequests.forEach(workflowESSyncServiceImpl::syncWithElasticService);
+            logger.debug("Successfully processed workflow request with user ID: {}", userId);
+        } catch (Exception e) {
+            logger.error("Error processing workflow request with wf ID: {}", userId, e);
+        }
+    }
+
     private void createAudit(List<WfRequest> wfRequestList) {
-        wfRequestList.forEach(wfRequest -> workflowAuditProcessingService.createAudit(wfRequest));
+        wfRequestList.forEach(workflowAuditProcessingService::createAudit);
     }
 }

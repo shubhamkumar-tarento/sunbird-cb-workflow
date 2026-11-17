@@ -9,12 +9,12 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 public class BadRequestException extends RuntimeException {
 
 	private static final long serialVersionUID = 1L;
-	private String message;
+	private final String message;
 
 	public BadRequestException(String message) {
 		this.message = message;
 	}
-	
+
 	public BadRequestException(String message,Throwable e) {
 		super(message,e);
 		this.message = message;
@@ -23,10 +23,6 @@ public class BadRequestException extends RuntimeException {
 	@Override
 	public String getMessage() {
 		return message;
-	}
-
-	public void setMessage(String message) {
-		this.message = message;
 	}
 
 }

@@ -13,7 +13,7 @@ import redis.clients.jedis.JedisPool;
 @RequiredArgsConstructor
 public class RedisCacheMgr {
 
-    private static Integer cache_ttl = 84600;
+    private static Integer cacheTtl = 84600;
 
     private static final String CACHE_KEY_VALUE_LOG_PREFIX = "Cache_key_value ";
 
@@ -27,7 +27,7 @@ public class RedisCacheMgr {
     public void putCache(String key, String[] values, Integer ttl) {
         try (Jedis jedis = jedisPool.getResource()) {
             if(null == ttl)
-                ttl = cache_ttl;
+                ttl = cacheTtl;
             jedis.sadd(Constants.REDIS_COMMON_KEY + key, values);
             jedis.expire(Constants.REDIS_COMMON_KEY + key, ttl);
             logger.debug("{}{}{} is saved in redis", CACHE_KEY_VALUE_LOG_PREFIX, Constants.REDIS_COMMON_KEY, key);

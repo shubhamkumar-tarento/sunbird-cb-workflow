@@ -543,7 +543,6 @@ class NotificationServiceImplTest {
     @Test
     void sendNotificationToMdoLeader_shouldSendNotificationToMdoLeader() {
         List<String> mdoMails = List.of("mdo@example.com");
-        WfRequest wfRequest = new WfRequest();
         String communityName = "Community";
         String creationDate = "2024-06-01";
         List<Map<String, Object>> moderators = List.of(Map.of(Constants.MODERATOR_NAME, "Mod1"), Map.of(Constants.MODERATOR_NAME, "Mod2"));
@@ -552,7 +551,7 @@ class NotificationServiceImplTest {
         when(configuration.getCommunityModeratorTransferTemplate()).thenReturn("communityTemplate");
         when(cassandraOperation.getRecordsByProperties(any(), any(), any(), any())).thenReturn(List.of(Map.of(Constants.TEMPLATE, "template-content")));
 
-        notificationService.sendNotificationToMdoLeader(mdoMails, wfRequest, communityName, creationDate, moderators);
+        notificationService.sendNotificationToMdoLeader(mdoMails, communityName, creationDate, moderators);
 
         verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
     }

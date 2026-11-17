@@ -1,6 +1,7 @@
 package org.sunbird.workflow.config;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.http.HttpHost;
@@ -28,9 +29,7 @@ public class ElasticsearchConfig {
         List<String> host = new ArrayList<>();
         List<Integer> ports = new ArrayList<>();
         String[] splitedHost = userESHost.split(",");
-        for (String val : splitedHost) {
-            host.add(val);
-        }
+        Collections.addAll(host, splitedHost);
 
         String[] splitedPort = userESPort.split(",");
         for (String val : splitedPort) {

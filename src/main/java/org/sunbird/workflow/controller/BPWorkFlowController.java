@@ -105,7 +105,7 @@ public class BPWorkFlowController {
     @PostMapping(path = "/stats")
     public ResponseEntity<Response> getBatchStats(@RequestBody Map<String, Object> request) {
         Response response = bPWorkFlowService.readStats(request);
-        return new ResponseEntity<Response>(response, response.getResponseCode());
+        return new ResponseEntity<>(response, response.getResponseCode());
     }
 
     /**

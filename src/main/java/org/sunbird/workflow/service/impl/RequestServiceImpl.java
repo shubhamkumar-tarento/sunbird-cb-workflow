@@ -33,6 +33,7 @@ public class RequestServiceImpl {
 	private static final String URI_LOG_PREFIX = "URI: ";
 	private static final String REQUEST_LOG_PREFIX = "Request: ";
 	private static final String EXTERNAL_SERVICE_EXCEPTION_LOG = "External Service threw an Exception: ";
+	private static final String GENERIC_EXTERNAL_SERVICE_EXCEPTION_LOG = "Exception occured while calling the exteranl service: ";
 
 	private final ObjectMapper mapper;
 	private final RestTemplate restTemplate;
@@ -40,13 +41,14 @@ public class RequestServiceImpl {
 
 	public Object fetchResult(StringBuilder uri, Object request, Class<?> classType) {
 		mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-		Object response = null;
 		StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(FETCH_RESULT_LOG_PREFIX)
 				.append(System.lineSeparator());
 		str.append(URI_LOG_PREFIX).append(uri.toString()).append(System.lineSeparator());
 		try {
-			str.append(REQUEST_LOG_PREFIX).append(mapper.writeValueAsString(request)).append(System.lineSeparator());
-			log.debug(str.toString());
+			if (log.isDebugEnabled()) {
+				str.append(REQUEST_LOG_PREFIX).append(mapper.writeValueAsString(request)).append(System.lineSeparator());
+				log.debug(str.toString());
+			}
 		} catch (JsonProcessingException e) {
 			log.error("Json processing exception occured: ", e);
 		}
@@ -60,7 +62,9 @@ public class RequestServiceImpl {
 				.append(System.lineSeparator());
 		str.append(URI_LOG_PREFIX).append(uri.toString()).append(System.lineSeparator());
 		try {
-			log.debug(str.toString());
+			if (log.isDebugEnabled()) {
+				log.debug(str.toString());
+			}
 			response = restTemplate.getForObject(uri.toString(), Map.class);
 		} catch (HttpClientErrorException e) {
 			log.error(EXTERNAL_SERVICE_EXCEPTION_LOG, e);
@@ -77,7 +81,7 @@ public class RequestServiceImpl {
 	 * @return
 	 * @throws Exception
 	 */
-	public Object fetchResultUsingPost(StringBuilder uri, Object request, Class<?> objectType,HashMap<String, String> headersValue) {
+	public Object fetchResultUsingPost(StringBuilder uri, Object request, Class<?> objectType,Map<String, String> headersValue) {
 		ObjectMapper localMapper = new ObjectMapper();
 		localMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 		Object response = null;
@@ -100,7 +104,7 @@ public class RequestServiceImpl {
 		} catch (HttpClientErrorException e) {
 			log.error(EXTERNAL_SERVICE_EXCEPTION_LOG, e);
 		} catch (Exception e) {
-			log.error("Exception occured while calling the exteranl service: ", e);
+			log.error(GENERIC_EXTERNAL_SERVICE_EXCEPTION_LOG, e);
 		}
 		return response;
 	}
@@ -112,42 +116,61 @@ public class RequestServiceImpl {
 		try {
 			HttpHeaders headers = new HttpHeaders();
 			if (!CollectionUtils.isEmpty(headersValues)) {
-				headersValues.forEach((k, v) -> headers.set(k, v));
+				headersValues.forEach(headers::set);
 			}
 			headers.setContentType(MediaType.APPLICATION_JSON);
 			HttpEntity<Object> entity = new HttpEntity<>(request, headers);
-			if (log.isDebugEnabled()) {
-				try {
-					StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(".fetchResult")
-							.append(System.lineSeparator());
-					str.append(URI_LOG_PREFIX).append(uri).append(System.lineSeparator());
-					str.append(REQUEST_LOG_PREFIX).append(localMapper.writeValueAsString(request)).append(System.lineSeparator());
-					log.debug(str.toString());
-				} catch (JsonProcessingException je) {
-				}
-			}
+			logPatchRequestIfDebug(uri, request, localMapper);
 			response = restTemplate.patchForObject(uri, entity, Map.class);
-			if (log.isDebugEnabled()) {
-				try {
-					StringBuilder str = new StringBuilder("Response: ");
-					str.append(localMapper.writeValueAsString(response)).append(System.lineSeparator());
-					log.debug(str.toString());
-				} catch (JsonProcessingException je) {
-				}
-			}
+			logPatchResponseIfDebug(response, localMapper);
 		} catch (HttpClientErrorException e) {
-			try {
-				response = localMapper.readValue(e.getResponseBodyAsString(), new TypeReference<HashMap<String, Object>>() {
-				});
-				response.put(Constants.HTTP_STATUS_CODE, e.getStatusCode());
-			} catch (Exception e1) {
-			}
-			log.error("Error received: " + e.getResponseBodyAsString(), e);
+			response = parsePatchErrorBody(e, localMapper);
+			log.error("Error received: {}", e.getResponseBodyAsString(), e);
 		}
 		return response;
 	}
 
-	public Object fetchResultUsingPostUnhandled(StringBuilder uri, Object request, Class<?> objectType,HashMap<String, String> headersValue) throws IOException {
+	private void logPatchRequestIfDebug(String uri, Object request, ObjectMapper localMapper) {
+		if (!log.isDebugEnabled()) {
+			return;
+		}
+		try {
+			StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(".fetchResult")
+					.append(System.lineSeparator());
+			str.append(URI_LOG_PREFIX).append(uri).append(System.lineSeparator());
+			str.append(REQUEST_LOG_PREFIX).append(localMapper.writeValueAsString(request)).append(System.lineSeparator());
+			log.debug(str.toString());
+		} catch (JsonProcessingException je) {
+			log.debug("Unable to serialize request for debug logging", je);
+		}
+	}
+
+	private void logPatchResponseIfDebug(Map<String, Object> response, ObjectMapper localMapper) {
+		if (!log.isDebugEnabled()) {
+			return;
+		}
+		try {
+			StringBuilder str = new StringBuilder("Response: ");
+			str.append(localMapper.writeValueAsString(response)).append(System.lineSeparator());
+			log.debug(str.toString());
+		} catch (JsonProcessingException je) {
+			log.debug("Unable to serialize response for debug logging", je);
+		}
+	}
+
+	private Map<String, Object> parsePatchErrorBody(HttpClientErrorException e, ObjectMapper localMapper) {
+		try {
+			Map<String, Object> response = localMapper.readValue(e.getResponseBodyAsString(), new TypeReference<HashMap<String, Object>>() {
+			});
+			response.put(Constants.HTTP_STATUS_CODE, e.getStatusCode());
+			return response;
+		} catch (Exception e1) {
+			log.debug("Unable to parse error response body", e1);
+			return null;
+		}
+	}
+
+	public Object fetchResultUsingPostUnhandled(StringBuilder uri, Object request, Class<?> objectType,Map<String, String> headersValue) throws IOException {
 		ObjectMapper localMapper = new ObjectMapper();
 		localMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 		Object response = null;
@@ -170,11 +193,8 @@ public class RequestServiceImpl {
 		} catch (HttpClientErrorException e) {
 			log.error(EXTERNAL_SERVICE_EXCEPTION_LOG, e);
 			throw e;
-		} catch (IOException e) {
-			log.error("Exception occured while calling the exteranl service: ", e);
-			throw e;
-		} catch (RuntimeException e) {
-			log.error("Exception occured while calling the exteranl service: ", e);
+		} catch (IOException | RuntimeException e) {
+			log.error(GENERIC_EXTERNAL_SERVICE_EXCEPTION_LOG, e);
 			throw e;
 		}
 		return response;

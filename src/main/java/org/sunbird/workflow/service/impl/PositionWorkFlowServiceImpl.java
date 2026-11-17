@@ -2,7 +2,6 @@ package org.sunbird.workflow.service.impl;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.Response;
 import org.sunbird.workflow.models.SearchCriteria;
 import org.sunbird.workflow.models.WfRequest;
@@ -20,25 +19,21 @@ public class PositionWorkFlowServiceImpl implements PositionWorkFlowService {
 
     @Override
     public Response createPositionWorkFlow(String rootOrg, String org, WfRequest wfRequest) {
-        Response response = workflowService.workflowTransition(rootOrg, org, wfRequest);
-        return response;
+        return workflowService.workflowTransition(rootOrg, org, wfRequest);
     }
 
     @Override
     public Response updatePositionWorkFlow(String rootOrg, String org, WfRequest wfRequest) {
-        Response response = workflowService.workflowTransition(rootOrg, org, wfRequest);
-        return response;
+        return createPositionWorkFlow(rootOrg, org, wfRequest);
     }
 
     @Override
     public Response readPositionWFApplication(String rootOrg, String org, String wfId, String applicationId) {
-        Response response = workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
-        return response;
+        return workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
     }
 
     @Override
     public Response positionSearch(String rootOrg, String org, SearchCriteria criteria) {
-        Response response = workflowService.applicationsSearch(rootOrg, org, criteria);
-        return response;
+        return workflowService.applicationsSearch(rootOrg, org, criteria);
     }
 }

@@ -214,7 +214,7 @@ class UserProfileWfServiceImplTest {
         param.put(Constants.TO_VALUE, new HashMap<>());
         wfRequestParamList.add(param);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfRequestParamList, profileDetails);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfRequestParamList, profileDetails);
 
         assertNull(result);
     }
@@ -230,7 +230,7 @@ class UserProfileWfServiceImplTest {
         Map<String, Object> right = new HashMap<>();
         right.put("key", "value");
 
-        UserProfileWfServiceImpl.mergeLeaf(left, right, "leaf", "id");
+        UserProfileWfServiceImpl.mergeLeaf(left, right, "leaf");
 
         assertEquals("value", ((Map<String, Object>)((List<?>)left.get("leaf")).get(0)).get("key"));
     }
@@ -241,7 +241,7 @@ class UserProfileWfServiceImplTest {
         Map<String, Object> right = new HashMap<>();
         right.put("name", "dept");
 
-        UserProfileWfServiceImpl.mergeLeaf(left, right, Constants.PROFESSIONAL_DETAILS, "id");
+        UserProfileWfServiceImpl.mergeLeaf(left, right, Constants.PROFESSIONAL_DETAILS);
 
         assertTrue(left.containsKey(Constants.PROFESSIONAL_DETAILS));
     }
@@ -420,7 +420,7 @@ class UserProfileWfServiceImplTest {
         readData.put(Constants.RESULT, userResults);
 
         doReturn(wfStatusEntity).when(wfStatusRepo).findByApplicationIdAndWfId(any(), any());
-        doReturn(new HashMap<>()).when(userProfileWfServiceImpl).updateRequestWithWF(any(), any(), any());
+        doReturn(new HashMap<>()).when(userProfileWfServiceImpl).updateRequestWithWF(any(), any());
 
         assertDoesNotThrow(()-> userProfileWfServiceImpl.updateUserProfileV2(List.of(wfRequest), "userId", null));
     }
@@ -760,7 +760,7 @@ class UserProfileWfServiceImplTest {
 
         when(mapper.convertValue(fieldData, ArrayList.class)).thenReturn((ArrayList) fieldData);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(uuid, wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         assertNotNull(result);
         assertTrue(((List<Map<String, Object>>) result.get("fieldKey1")).get(0).containsKey("key1"));
@@ -783,7 +783,7 @@ class UserProfileWfServiceImplTest {
         // ✅ Directly pass values (no need for eq(...) when using real instances)
         when(mapper.convertValue(mapData, Map.class)).thenReturn(mapData);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         assertNotNull(result);
         assertTrue(((Map<String, Object>) result.get("fieldKey2")).containsKey("existingKey"));
@@ -803,7 +803,7 @@ class UserProfileWfServiceImplTest {
 
         List<HashMap<String, Object>> wfList = List.of(wfObj);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         assertEquals(Boolean.TRUE, result.get("verifiedKarmayogi"));
     }
@@ -819,7 +819,7 @@ class UserProfileWfServiceImplTest {
 
         List<HashMap<String, Object>> wfList = List.of(wfObj);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         assertEquals(Boolean.TRUE, result.get("verifiedKarmayogi"));
     }
@@ -835,7 +835,7 @@ class UserProfileWfServiceImplTest {
 
         List<HashMap<String, Object>> wfList = List.of(wfObj);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         List<Map<String, Object>> profList = (List<Map<String, Object>>) result.get("professionalDetails");
         assertNotNull(profList);
@@ -852,7 +852,7 @@ class UserProfileWfServiceImplTest {
 
         List<HashMap<String, Object>> wfList = List.of(wfObj);
 
-        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF("uuid", wfList, existingProfileDetail);
+        Map<String, Object> result = userProfileWfServiceImpl.updateRequestWithWF(wfList, existingProfileDetail);
 
         assertNull(result); // logs error and returns null
     }

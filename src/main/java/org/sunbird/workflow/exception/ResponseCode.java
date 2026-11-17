@@ -60,14 +60,6 @@ public enum ResponseCode {
     }
 
     /**
-     * @param errorCode
-     * @return
-     */
-    public String getMessage(int errorCode) {
-        return "";
-    }
-
-    /**
      * @return
      */
     public String getErrorCode() {
@@ -77,7 +69,7 @@ public enum ResponseCode {
     /**
      * @param errorCode
      */
-    public void setErrorCode(String errorCode) {
+    void setErrorCode(String errorCode) {
         this.errorCode = errorCode;
     }
 
@@ -91,7 +83,7 @@ public enum ResponseCode {
     /**
      * @param errorMessage
      */
-    public void setErrorMessage(String errorMessage) {
+    void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
     }
 
@@ -99,7 +91,7 @@ public enum ResponseCode {
         return httpResponseCode;
     }
 
-    public void setResponseCode(int httpResponseCode) {
+    void setResponseCode(int httpResponseCode) {
         this.httpResponseCode = httpResponseCode;
     }
 }

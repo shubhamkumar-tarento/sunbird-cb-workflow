@@ -13,7 +13,6 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
-import org.sunbird.workflow.consumer.ApplicationProcessingConsumer;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.models.WfStatus;
 import org.sunbird.workflow.models.notification.Config;
@@ -36,7 +35,7 @@ import static org.sunbird.workflow.config.Constants.*;
 public class NotificationServiceImpl {
 
 	public static final String EMAILTEMPLATE = "emailtemplate";
-	Logger logger = LogManager.getLogger(ApplicationProcessingConsumer.class);
+	Logger logger = LogManager.getLogger(NotificationServiceImpl.class);
 
 	private final WfStatusRepo wfStatusRepo;
 	private final Configuration configuration;
@@ -62,12 +61,6 @@ public class NotificationServiceImpl {
 		this.contentReadService = contentReadService;
 	}
 
-	private static final String WORK_FLOW_EVENT_NAME = "workflow_service_notification";
-
-	private static final String USER_NAME_CONSTANT = "user";
-
-	private static final String USER_NAME_TAG = "#userName";
-
 	private static final String STATE_NAME_TAG = "#state";
 
 	private static final String DUE_TO_PREFIX = ", due to <b>";
@@ -77,8 +70,6 @@ public class NotificationServiceImpl {
 	private static final String FIELD_KEY_TAG = "#fieldKey";
 
 	private static final String TO_VALUE_TAG = "#toValue";
-
-	private static final String COMMENT_TAG = "#comment";
 
 	private static final String TO_VALUE_CONST = "toValue";
 
@@ -118,11 +109,13 @@ public class NotificationServiceImpl {
 				wfRequest.getWfId());
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
-		try {
-			logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
-			logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
-		} catch (JsonProcessingException e) {
-			logger.error("Failed to serialize workflow status for logging", e);
+		if (logger.isInfoEnabled()) {
+			try {
+				logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
+				logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
+			} catch (JsonProcessingException e) {
+				logger.error("Failed to serialize workflow status for logging", e);
+			}
 		}
 		if (Constants.PROFILE_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName()) && Constants.WITHDRAWN.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
 			return;
@@ -204,11 +197,13 @@ public class NotificationServiceImpl {
 				wfRequest.getWfId());
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
-		try {
-			logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
-			logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
-		} catch (JsonProcessingException e) {
-			logger.error("Failed to serialize workflow status for logging", e);
+		if (logger.isInfoEnabled()) {
+			try {
+				logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
+				logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
+			} catch (JsonProcessingException e) {
+				logger.error("Failed to serialize workflow status for logging", e);
+			}
 		}
 		if (Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
 			logger.info("Enters in the email notification block");
@@ -535,13 +530,10 @@ public class NotificationServiceImpl {
 		}
 	}
 
-	public void sendNotificationToMdoLeader(List<String> mdoMails, WfRequest wfRequest, String communityName, String creationDate, List<Map<String, Object>> moderators) {
+	public void sendNotificationToMdoLeader(List<String> mdoMails, String communityName, String creationDate, List<Map<String, Object>> moderators) {
 		try {
 			String moderatorDetails = moderators.stream()
-					.map(mod -> {
-						String name = (String) mod.getOrDefault(Constants.MODERATOR_NAME, "");
-						return name;
-					})
+					.map(mod -> (String) mod.getOrDefault(Constants.MODERATOR_NAME, ""))
 					.filter(StringUtils::isNotBlank)
 					.distinct()
 					.collect(Collectors.joining(", "));

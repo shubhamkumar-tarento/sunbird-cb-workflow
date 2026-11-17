@@ -607,7 +607,7 @@ public class UserBulkUploadService {
         if (nextRow.getCell(13) != null && nextRow.getCell(13).getCellType() != CellType.BLANK) {
             if (nextRow.getCell(13).getCellType() == CellType.STRING) {
                 String tagStr = nextRow.getCell(13).getStringCellValue().trim();
-                List<String> tagList = new ArrayList<String>();
+                List<String> tagList = new ArrayList<>();
                 if (!org.apache.commons.lang.StringUtils.isEmpty(tagStr)) {
                     String[] tagStrList = tagStr.split(",", -1);
                     for(String tag : tagStrList) {
@@ -700,8 +700,7 @@ public class UserBulkUploadService {
             wfRequest.setWfId(wfId);
             return wfRequest;
         }
-        if(object instanceof WfStatusEntity){
-            WfStatusEntity wfStatusEntity = (WfStatusEntity) object;
+        if(object instanceof WfStatusEntity wfStatusEntity){
             wfRequest.setWfId(wfStatusEntity.getWfId());
             wfRequest.setComment(wfStatusEntity.getComment());
             wfRequest.setDeptName(wfStatusEntity.getDeptName());
@@ -750,7 +749,7 @@ public class UserBulkUploadService {
             return !designationsSet.contains(fieldValue);
         }
     }
-    public void processBulkUploadV1(HashMap<String, String> inputDataMap) throws IOException {
+    public void processBulkUploadV1(Map<String, String> inputDataMap) throws IOException {
         File file = null;
         int totalRecordsCount = 0;
         int noOfSuccessfulRecords = 0;
@@ -775,7 +774,7 @@ public class UserBulkUploadService {
                 List<CSVRecord> csvRecords = csvParser.getRecords();
                 List<Map<String, Object>> updatedRecords = new ArrayList<>();
                 List<String> headers = new ArrayList<>(csvParser.getHeaderNames());
-                headers.replaceAll(header -> header.replaceAll("(?:^\")|(?:\"$)", ""));
+                headers.replaceAll(header -> header.replaceAll("^\"|\"$", ""));
 
                 if (!headers.contains(Constants.STATUS_BULK_UPLOAD)) {
                     headers.add(Constants.STATUS_BULK_UPLOAD);
@@ -784,9 +783,9 @@ public class UserBulkUploadService {
                     headers.add(Constants.ERROR_DETAILS);
                 }
 
-                for (CSVRecord record : csvRecords) {
-                    if (record.size() > headers.size() - 2) {
-                        Map<String, Object> errorRecord = new LinkedHashMap<>(record.toMap());
+                for (CSVRecord csvRecord : csvRecords) {
+                    if (csvRecord.size() > headers.size() - 2) {
+                        Map<String, Object> errorRecord = new LinkedHashMap<>(csvRecord.toMap());
                         errorRecord.put(Constants.STATUS_BULK_UPLOAD, "FAILED");
                         errorRecord.put(Constants.ERROR_DETAILS, "Number of fields in the record exceeds expected number. Please check your data.");
                         updatedRecords.add(errorRecord);
@@ -796,17 +795,15 @@ public class UserBulkUploadService {
                     }
                     long duration = 0;
                     long startTime = System.currentTimeMillis();
-                    logger.info("UserBulkUploadService:: Record {}", record.getRecordNumber());
-                    StringBuilder str = new StringBuilder();
+                    logger.info("UserBulkUploadService:: Record {}", csvRecord.getRecordNumber());
                     List<String> errList = new ArrayList<>();
-                    Map<String, Object> csvValues = new HashMap<>(record.toMap());
+                    Map<String, Object> csvValues = new HashMap<>(csvRecord.toMap());
                     Map<String, Object> valuesToBeUpdate = new HashMap<>();
                     Map<String, Object> userDetails = null;
-                    boolean isEmailOrPhoneNumberValid = false;
 
                     // Validate email and phone presence
-                    String email = record.size() > 1 && record.get(1) != null ? record.get(1).toLowerCase().trim() : null;
-                    String phone = record.size() > 2 && record.get(2) != null ? record.get(2).trim() : null;
+                    String email = csvRecord.size() > 1 && csvRecord.get(1) != null ? csvRecord.get(1).toLowerCase().trim() : null;
+                    String phone = csvRecord.size() > 2 && csvRecord.get(2) != null ? csvRecord.get(2).trim() : null;
                     boolean emailExists = email != null && !email.isEmpty();
                     boolean phoneExists = phone != null && !phone.isEmpty();
                     if (!emailExists && !phoneExists) {
@@ -892,22 +889,22 @@ public class UserBulkUploadService {
                     }
 
                     // Validate and update fields
-                    validateFullNameColumnV1(record, valuesToBeUpdate, errList);
-                    validateGroupColumnV1(record, valuesToBeUpdate, errList);
+                    validateFullNameColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateGroupColumnV1(csvRecord, valuesToBeUpdate, errList);
 
                     if (!isEmailOrPhoneNumberExist) {
                         valuesToBeUpdate.put(Constants.MOBILE, phone);
                     }
-                    validateDesignationColumnV1(record, valuesToBeUpdate, errList);
-                    validateGenderColumnV1(record, valuesToBeUpdate, errList);
-                    validateCategoryColumnV1(record, valuesToBeUpdate, errList);
-                    validateDobColumnV1(record, valuesToBeUpdate, errList);
-                    validateMotherTongueColumnV1(record, valuesToBeUpdate, errList);
-                    validateEmployeeIdColumnV1(record, valuesToBeUpdate, errList);
-                    validatePinCodeColumnV1(record, valuesToBeUpdate, errList);
-                    validateExternalSystemIdColumnV1(record, valuesToBeUpdate, errList);
-                    validateExternalSystemColumnV1(record, valuesToBeUpdate, errList);
-                    validateTagColumnV1(record, valuesToBeUpdate, errList, tagsDelimiter);
+                    validateDesignationColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateGenderColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateCategoryColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateDobColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateMotherTongueColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateEmployeeIdColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validatePinCodeColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateExternalSystemIdColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateExternalSystemColumnV1(csvRecord, valuesToBeUpdate, errList);
+                    validateTagColumnV1(csvRecord, valuesToBeUpdate, errList, tagsDelimiter);
 
                     if (!CollectionUtils.isEmpty(errList)) {
                         String statusValue = errList.isEmpty() ? Constants.SUCCESSFUL_UPERCASE : Constants.FAILED_UPPERCASE;
@@ -997,10 +994,10 @@ public class UserBulkUploadService {
                 try (FileWriter fileWriter = new FileWriter(file);
                      BufferedWriter bufferedWriter = new BufferedWriter(fileWriter);
                      CSVPrinter csvPrinter = new CSVPrinter(bufferedWriter, outputFormat)) {
-                    for (Map<String, Object> record : updatedRecords) {
+                    for (Map<String, Object> csvRecord : updatedRecords) {
                         List<String> recordValues = new ArrayList<>();
                         for (String header : headers) {
-                            recordValues.add((String) record.get(header));
+                            recordValues.add((String) csvRecord.get(header));
                         }
                         csvPrinter.printRecord(recordValues);
                     }
@@ -1045,9 +1042,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateFullNameColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(0).isEmpty()) {
-            String fullName = record.get(0).trim();
+    private void validateFullNameColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(0).isEmpty()) {
+            String fullName = csvRecord.get(0).trim();
             if (ValidationUtil.validateFullName(fullName)) {
                 valuesToBeUpdate.put(Constants.FIRSTNAME, fullName);
             } else {
@@ -1056,9 +1053,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateGroupColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(3).isEmpty()) {
-            String group = record.get(3).trim();
+    private void validateGroupColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(3).isEmpty()) {
+            String group = csvRecord.get(3).trim();
             valuesToBeUpdate.put(Constants.GROUP, group);
             if (!this.validateGroupValue(group)) {
                 errList.add("Invalid value of Group Type, please choose a valid value from the default list");
@@ -1066,9 +1063,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateDesignationColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(4).isEmpty()) {
-            String designation = record.get(4).trim();
+    private void validateDesignationColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(4).isEmpty()) {
+            String designation = csvRecord.get(4).trim();
             valuesToBeUpdate.put(Constants.DESIGNATION, designation);
             if (!ValidationUtil.validateCsvDesignationPattern(designation, configuration.getCsvDesignationRegex())) {
                 errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
@@ -1079,9 +1076,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateGenderColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(5).isEmpty()) {
-            String gender = record.get(5).trim();
+    private void validateGenderColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(5).isEmpty()) {
+            String gender = csvRecord.get(5).trim();
             if (validateGender(gender)) {
                 valuesToBeUpdate.put(Constants.GENDER, gender);
             } else {
@@ -1090,9 +1087,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateCategoryColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(6).isEmpty()) {
-            String category = record.get(6).trim();
+    private void validateCategoryColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(6).isEmpty()) {
+            String category = csvRecord.get(6).trim();
             if (validateCategory(category)) {
                 valuesToBeUpdate.put(Constants.CATEGORY, category);
             } else {
@@ -1101,9 +1098,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateDobColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(7).isEmpty()) {
-            String dob = record.get(7).trim();
+    private void validateDobColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(7).isEmpty()) {
+            String dob = csvRecord.get(7).trim();
             if (ValidationUtil.validateDate(dob)) {
                 valuesToBeUpdate.put(Constants.DOB, dob);
             } else {
@@ -1112,9 +1109,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateMotherTongueColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(8).isEmpty()) {
-            String motherTongue = record.get(8).trim();
+    private void validateMotherTongueColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(8).isEmpty()) {
+            String motherTongue = csvRecord.get(8).trim();
             if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(motherTongue) || this.validateFieldValue("languages", motherTongue)) {
                 errList.add("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)");
             }
@@ -1122,9 +1119,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateEmployeeIdColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(9).isEmpty()) {
-            String employeeId = record.get(9).trim();
+    private void validateEmployeeIdColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(9).isEmpty()) {
+            String employeeId = csvRecord.get(9).trim();
             valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, employeeId);
             if (!ValidationUtil.validateEmployeeId((String) valuesToBeUpdate.get(Constants.EMPLOYEE_CODE))) {
                 errList.add("Invalid Employee ID : Employee ID can contain alphanumeric characters or numeric character and have a max length of 30");
@@ -1132,9 +1129,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validatePinCodeColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(10).isEmpty()) {
-            String officePinCode = record.get(10).trim();
+    private void validatePinCodeColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(10).isEmpty()) {
+            String officePinCode = csvRecord.get(10).trim();
             if (!ValidationUtil.validatePinCode(officePinCode)) {
                 errList.add("Invalid Pin Code: " + officePinCode +
                         " Pin Code should be numeric and is of 6 digits.");
@@ -1143,9 +1140,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateExternalSystemIdColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(11).isEmpty()) {
-            String externalSystemId = record.get(11).trim();
+    private void validateExternalSystemIdColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(11).isEmpty()) {
+            String externalSystemId = csvRecord.get(11).trim();
             if (!ValidationUtil.validateExternalSystemId(externalSystemId)) {
                 errList.add("Invalid External System ID: " + externalSystemId +
                         " External System Id can contain alphanumeric characters and have a max length of 30");
@@ -1154,9 +1151,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateExternalSystemColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (!record.get(12).isEmpty()) {
-            String externalSystem = record.get(12).trim();
+    private void validateExternalSystemColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!csvRecord.get(12).isEmpty()) {
+            String externalSystem = csvRecord.get(12).trim();
             if (!ValidationUtil.validateExternalSystem(externalSystem)) {
                 errList.add("Invalid External System Name: " + externalSystem +
                         " External System Name can contain only alphabets and can have a max length of 255");
@@ -1165,9 +1162,9 @@ public class UserBulkUploadService {
         }
     }
 
-    private void validateTagColumnV1(CSVRecord record, Map<String, Object> valuesToBeUpdate, List<String> errList, String tagsDelimiter) {
-        if (!record.get(13).isEmpty()) {
-            String[] tagStrList = record.get(13).trim().split(Pattern.quote(tagsDelimiter), -1);
+    private void validateTagColumnV1(CSVRecord csvRecord, Map<String, Object> valuesToBeUpdate, List<String> errList, String tagsDelimiter) {
+        if (!csvRecord.get(13).isEmpty()) {
+            String[] tagStrList = csvRecord.get(13).trim().split(Pattern.quote(tagsDelimiter), -1);
             List<String> tagList = new ArrayList<>();
             for (String tag : tagStrList) {
                 tagList.add(tag.trim());
@@ -1285,8 +1282,7 @@ public class UserBulkUploadService {
     }
 
 
-    private String uploadTheUpdatedCSVFile(File file)
-            throws IOException {
+    private String uploadTheUpdatedCSVFile(File file) {
 
         SBApiResponse uploadResponse = storageService.uploadFile(file, configuration.getUserBulkUpdateFolderName(), configuration.getWorkflowCloudContainerName());
         if (!HttpStatus.OK.equals(uploadResponse.getResponseCode())) {

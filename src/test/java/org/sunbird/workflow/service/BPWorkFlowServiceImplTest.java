@@ -240,7 +240,6 @@ class BPWorkFlowServiceImplTest {
         courseBatchDetails.put(Constants.BATCH_NAME, "Batch Name");
         courseBatchDetails.put(Constants.START_DATE, new Date());
 
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "BP_SERVICE", "primaryCategory", "Course"));
         when(wfStatusRepo.findByApplicationId(any())).thenReturn(new ArrayList<>());
         when(configuration.getBpBatchEnrolLimitBufferSize()).thenReturn(20);
         when(mapper.writeValueAsString(any())).thenReturn("updateFieldValue");
@@ -340,7 +339,6 @@ class BPWorkFlowServiceImplTest {
         courseBatchDetails.put(Constants.BATCH_NAME, "Batch Name");
         courseBatchDetails.put(Constants.START_DATE, new Date());
 
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "", "primaryCategory", "Course"));
         when(wfStatusRepo.findByApplicationId(any())).thenReturn(new ArrayList<>());
         when(configuration.getBpBatchEnrolLimitBufferSize()).thenReturn(20);
         when(mapper.writeValueAsString(any())).thenReturn("updateFieldValue");
@@ -1038,7 +1036,6 @@ class BPWorkFlowServiceImplTest {
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of(batchAttr));
 
-        when(contentReadService.getServiceNameDetails(COURSE_ID)).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
         when(wfStatusRepo.findByApplicationId(BATCH_ID)).thenReturn(List.of());
 
         when(configuration.getBpBatchEnrolLimitBufferSize()).thenReturn(20); // 20% buffer
@@ -1057,7 +1054,6 @@ class BPWorkFlowServiceImplTest {
     void testAdminEnrolBPWorkFlow_withNullServiceName_shouldDefault() {
         WfRequest req = getSampleRequest();
 
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(null);
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of());
 
@@ -1080,7 +1076,6 @@ class BPWorkFlowServiceImplTest {
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of(batchAttr));
 
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
 
         WfStatusEntity fullStatus = new WfStatusEntity();
         fullStatus.setCurrentStatus("APPROVED");
@@ -1110,7 +1105,6 @@ class BPWorkFlowServiceImplTest {
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of(batchAttr));
 
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
         when(wfStatusRepo.findByApplicationId(any())).thenReturn(List.of());
         when(configuration.getBpBatchEnrolLimitBufferSize()).thenReturn(0);
 
@@ -1133,7 +1127,6 @@ class BPWorkFlowServiceImplTest {
 
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of(batchAttr));
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
         when(wfStatusRepo.findByApplicationId(any())).thenReturn(List.of());
 
         // Simulate user already enrolled
@@ -1154,7 +1147,6 @@ class BPWorkFlowServiceImplTest {
         Map<String, Object> batchAttr = Map.of(Constants.BATCH_ATTRIBUTES, "invalid-json");
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(List.of(batchAttr));
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
 
         when(configuration.getBatchFullMesg()).thenReturn("Batch full");
 
@@ -1170,7 +1162,6 @@ class BPWorkFlowServiceImplTest {
 
         when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
                 .thenReturn(Collections.emptyList());
-        when(contentReadService.getServiceNameDetails(any())).thenReturn(Map.of("wfApprovalType", "service", "primaryCategory", "Course"));
 
         when(configuration.getBatchFullMesg()).thenReturn("Batch full");
 

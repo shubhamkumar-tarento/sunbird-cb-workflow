@@ -25,11 +25,7 @@ public class CassandraPropertyReader {
 	 * @throws IOException */
 	  private CassandraPropertyReader() throws IOException {
 	    InputStream in = this.getClass().getClassLoader().getResourceAsStream(PROPERTIES_FILE_NAME);
-	    try {
-	      properties.load(in);
-	    } catch (IOException e) {
-	    	throw e;
-	    }
+	    properties.load(in);
 	  }
 
 	  public static synchronized CassandraPropertyReader getInstance() {

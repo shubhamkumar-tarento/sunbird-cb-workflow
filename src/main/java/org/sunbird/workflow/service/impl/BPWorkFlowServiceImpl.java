@@ -91,20 +91,12 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         validateWfRequestMultilevelEnrol(wfRequest);
         Map<String, Object> courseBatchDetails = getCurrentBatchAttributes(wfRequest.getApplicationId(),
                 wfRequest.getCourseId());
-        Map<String, Object> courseDetails = contentReadService.getServiceNameDetails(wfRequest.getCourseId());
         // is the course applicable for the volunteer to enroll
         if (isVolunteerUser(wfRequest.getUserId()) && !isCourseEligibleForOrg(rootOrg, wfRequest.getCourseId())) {
             Response response = new Response();
             response.put(Constants.ERROR_MESSAGE,  Constants.VOLUNTEER_NOT_ELIGIBLE_TO_ENROLL);
             response.put(Constants.STATUS, HttpStatus.NOT_ACCEPTABLE);
             return response;
-        }
-        String serviceName = null;
-        if (MapUtils.isNotEmpty(courseDetails) && null != courseDetails.get(Constants.WF_APPROVAL_TYPE)) {
-            serviceName = (String) courseDetails.get(Constants.WF_APPROVAL_TYPE);
-        }
-        if (StringUtils.isBlank(serviceName)) {
-            serviceName = Constants.BLENDED_PROGRAM_SERVICE_NAME;
         }
         int totalUserEnrolCount = getTotalUserEnrolCountForBatch(wfRequest.getApplicationId());
         int totalApprovedUserCount = getTotalApprovedUserCount(wfRequest);
@@ -161,31 +153,26 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
     @Override
     public Response readBPWFApplication(String rootOrg, String org, String wfId, String applicationId) {
-        Response response = workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
-        return response;
+        return workflowService.getWfApplication(rootOrg, org, wfId, applicationId);
     }
 
     @Override
     public Response blendedProgramSearch(String rootOrg, String org, SearchCriteria criteria) {
-        Response response = workflowService.applicationsSearch(rootOrg, org, criteria,
+        return workflowService.applicationsSearch(rootOrg, org, criteria,
                 Constants.BLENDED_PROGRAM_SEARCH_ENABLED);
-        return response;
     }
 
     public Response bpPCSearch(String rootOrg, String org, SearchCriteriaV2 criteria) {
-        Response response = workflowService.appsPCSearchV2(rootOrg, org, criteria);
-        return response;
+        return workflowService.appsPCSearchV2(rootOrg, org, criteria);
     }
 
     public Response bpMDOSearch(String rootOrg, String org, SearchCriteriaV2 criteria) {
-        Response response = workflowService.appsPCSearchV2(rootOrg, org, criteria);
-        return response;
+        return bpPCSearch(rootOrg, org, criteria);
     }
 
     @Override
     public Response blendedProgramStatusCount(SearchCriteria criteria) {
-        Response response = workflowService.statusCountOnApplicationId( criteria);
-        return response;
+        return workflowService.statusCountOnApplicationId( criteria);
     }
 
     @Override
@@ -219,8 +206,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                     logger.info("User enrolment success");
                 } else {
                     if (enrolResp != null) {
-                        logger.error("user enrolment failed"
-                                + ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+                        logger.error("user enrolment failed: {}",
+                                ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
                     } else {
                         logger.error("user enrolment failed: no response from course service");
                     }
@@ -248,7 +235,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 propertyMap,
                 Arrays.asList(Constants.BATCH_ATTRIBUTES, Constants.ENROLMENT_END_DATE, Constants.START_DATE, Constants.NAME));
         if (CollectionUtils.isNotEmpty(batchAttributesDetails)) {
-            Map<String, Object> courseBatch = (Map<String, Object>) batchAttributesDetails.get(0);
+            Map<String, Object> courseBatch = batchAttributesDetails.get(0);
             if (courseBatch.containsKey(Constants.BATCH_ATTRIBUTES)) {
                 try {
                     Map<String, Object> batchAttributes = (new ObjectMapper()).readValue(
@@ -292,9 +279,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 Constants.TABLE_ENROLMENT_BATCH_LOOKUP, propertyMap,Arrays.asList(Constants.BATCH_ID, Constants.USER_ID,Constants.ACTIVE));
            // Stream to filter and collect only non-null "endDate" maps
         return list.stream()
-                .filter(item -> {
-                    return item != null && item.containsKey("active") && (boolean) item.get("active") == true;
-                })
+                .filter(item -> item != null && item.containsKey("active") && (boolean) item.get("active"))
                 .toList().size();
     }
     public boolean validateBatchEnrolment(Map<String, Object> courseBatchDetails, int totalApprovedUserCount,
@@ -322,8 +307,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
     @Override
     public Response blendedProgramUserSearch(String rootOrg, String org, String userId, SearchCriteria searchCriteria) {
         searchCriteria.setUserId(userId);
-        Response response = workflowService.applicationsSearch(rootOrg, org, searchCriteria);
-        return response;
+        return workflowService.applicationsSearch(rootOrg, org, searchCriteria);
     }
 
     public Response readBPWFApplication(String wfId, boolean isPc) {
@@ -355,8 +339,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
             case Constants.REMOVED:
                 removeEnrolmentDetails(wfRequest);
                 break;
-            case Constants.ENROLL_IS_IN_PROGRESS:
-            case Constants.ADMIN_ENROLL_IS_IN_PROGRESS:
+            case Constants.ENROLL_IS_IN_PROGRESS, Constants.ADMIN_ENROLL_IS_IN_PROGRESS:
                 handleEnrollmentRequest(wfRequest);
                 break;
             case Constants.ONE_STEP_MDO_APPROVAL:
@@ -422,11 +405,11 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 response.setResponseCode(HttpStatus.BAD_REQUEST);
                 return response;
             }
-            Map<String, Object> respCourseDetails = new HashMap<String, Object>();
+            Map<String, Object> respCourseDetails = new HashMap<>();
             Map<String, Object> requestBody = (Map<String, Object>) request.get(Constants.REQUEST);
             List<String> courseIdList = (List<String>) requestBody.get(Constants.COURSE_ID_LIST);
             List<String> fileds = Arrays.asList(Constants.COURSE_ID, Constants.BATCH_ID, Constants.END_DATE);
-            Map<String, Object> propertyMap = new HashMap<String, Object>();
+            Map<String, Object> propertyMap = new HashMap<>();
             propertyMap.put(Constants.COURSE_ID, courseIdList);
             List<Map<String, Object>> courseBatchDetailsList = cassandraOperation.getRecordsByProperties(
                     Constants.KEYSPACE_SUNBIRD_COURSES, Constants.TABLE_COURSE_BATCH, propertyMap, fileds);
@@ -459,14 +442,14 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         Map<String, Object> respCourseBatch = (Map<String, Object>) respCourseDetails.get(courseId);
         Map<String, Object> respBatchDetailsMap;
         if (ObjectUtils.isEmpty(respCourseBatch)) {
-            respCourseBatch = new HashMap<String, Object>();
+            respCourseBatch = new HashMap<>();
             respCourseBatch.put(Constants.COURSE_ID, courseId);
-            respBatchDetailsMap = new HashMap<String, Object>();
+            respBatchDetailsMap = new HashMap<>();
         } else {
             respBatchDetailsMap = (Map<String, Object>) respCourseBatch.get(Constants.BATCH_DETAILS_KEY);
         }
 
-        Map<String, Object> respBatchDetail = new HashMap<String, Object>();
+        Map<String, Object> respBatchDetail = new HashMap<>();
         // Batch is active. Get the batch enrolment details.
         List<WfStatusEntity> wfEntries = wfStatusRepo.findByServiceNameAndApplicationId(
                 Constants.BLENDED_PROGRAM_SERVICE_NAME, batchId);
@@ -552,14 +535,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
     public Response adminEnrolBPWorkFlow(String rootOrg, String org, WfRequest wfRequest) {
         Map<String, Object> courseBatchDetails = getCurrentBatchAttributes(wfRequest.getApplicationId(),
                 wfRequest.getCourseId());
-        Map<String, Object> courseDetails = contentReadService.getServiceNameDetails(wfRequest.getCourseId());
-        String serviceName = null;
-        if (courseDetails != null && courseDetails.get(Constants.WF_APPROVAL_TYPE) != null) {
-            serviceName = (String) courseDetails.get(Constants.WF_APPROVAL_TYPE);
-        }
-        if (serviceName == null || serviceName.isEmpty()) {
-            serviceName = Constants.BLENDED_PROGRAM_SERVICE_NAME;
-        }
         int totalUserEnrolCount = getTotalUserEnrolCountForBatch(wfRequest.getApplicationId());
         int totalApprovedUserCount = getTotalApprovedUserCount(wfRequest);
         boolean enrolAccess = validateBatchEnrolment(courseBatchDetails, totalApprovedUserCount, totalUserEnrolCount,
@@ -731,7 +706,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
      * @return - return a boolean value 'true' is there is conflict of the dates.
      */
     public boolean enrollmentDateValidations(List<Map<String, Object>> enrolledCourseBatchList, Date[] startDate, Date[] endDate) {
-        boolean hasConflict = enrolledCourseBatchList.stream().anyMatch(enrolledCourseBatch -> {
+        return enrolledCourseBatchList.stream().anyMatch(enrolledCourseBatch -> {
             Date startDateValue = Date.from((Instant) enrolledCourseBatch.get(Constants.START_DATE));
             Date endDateValue = Date.from((Instant) enrolledCourseBatch.get(Constants.END_DATE));
 
@@ -747,8 +722,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
 
             return false;
         });
-
-        return hasConflict;
     }
 
     /**
@@ -854,9 +827,6 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
      */
     @Override
     public void removeEnrolmentDetails(WfRequest wfRequest) {
-        Map<String, Object> courseBatchDetails = getCurrentBatchAttributes(wfRequest.getApplicationId(),
-                wfRequest.getCourseId());
-
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put(Constants.USER_ID, wfRequest.getUserId());
             requestBody.put(Constants.BATCH_ID, wfRequest.getApplicationId());
@@ -1320,8 +1290,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         return actualHeaders;
     }
 
-    private Map<String, String> processDataRow(CSVRecord record, List<String> expectedHeaders, int rowNumber, List<String> errors) {
-        List<String> tokens = record.toList();
+    private Map<String, String> processDataRow(CSVRecord csvRecord, List<String> expectedHeaders, int rowNumber, List<String> errors) {
+        List<String> tokens = csvRecord.toList();
         if (tokens.size() < expectedHeaders.size()) {
             errors.add("Row " + rowNumber + " is incomplete: expected " + expectedHeaders.size() + " columns.");
             return null;
@@ -1812,8 +1782,7 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         }
         entity.setComment("Auto-approved via nomination wrapper (PC final)");
 
-        WfStatusEntity saved = wfStatusRepo.save(entity);
-        return saved;
+        return wfStatusRepo.save(entity);
     }
 
     private String getFirstName(String userId) {

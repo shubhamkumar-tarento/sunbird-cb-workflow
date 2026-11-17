@@ -14,15 +14,15 @@ public class ProjectCommonException extends RuntimeException {
     /**
      * code String code ResponseCode.
      */
-    private String code;
+    private final String code;
     /**
      * message String ResponseCode.
      */
-    private String message;
+    private final String message;
     /**
      * responseCode int ResponseCode.
      */
-    private int responseCode;
+    private final int responseCode;
 
     /**
      * three argument constructor.
@@ -48,15 +48,6 @@ public class ProjectCommonException extends RuntimeException {
     }
 
     /**
-     * To set the client code.
-     *
-     * @param code String
-     */
-    public void setCode(String code) {
-        this.code = code;
-    }
-
-    /**
      * message for client in english.
      *
      * @return String
@@ -67,25 +58,11 @@ public class ProjectCommonException extends RuntimeException {
     }
 
     /**
-     * @param message String
-     */
-    public void setMessage(String message) {
-        this.message = message;
-    }
-
-    /**
      * This method will provide response code, this code will be used in response header.
      *
      * @return int
      */
     public int getResponseCode() {
         return responseCode;
-    }
-
-    /**
-     * @param responseCode int
-     */
-    public void setResponseCode(int responseCode) {
-        this.responseCode = responseCode;
     }
 }

@@ -65,7 +65,8 @@ class ContentReadServiceImplTest {
 
         Map<String, Object> result = service.getServiceNameDetails(courseId);
 
-        assertNull(result);
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
     }
 
     @Test
@@ -79,7 +80,8 @@ class ContentReadServiceImplTest {
 
         Map<String, Object> result = service.getServiceNameDetails(courseId);
 
-        assertNull(result);
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
     }
 
     @Test

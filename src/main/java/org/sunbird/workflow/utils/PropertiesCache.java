@@ -32,6 +32,7 @@ public class PropertiesCache {
             try {
                 configProp.load(in);
             } catch (IOException e) {
+                // intentionally ignored: a missing/unreadable properties file falls back to env vars and defaults
             }
         }
     }
