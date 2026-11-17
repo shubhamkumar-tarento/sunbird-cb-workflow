@@ -731,7 +731,6 @@ public class WorkflowServiceImpl implements Workflowservice {
 		boolean searchEnabled = isSearchEnabled.length >= 1 && isSearchEnabled[0];
 		Pageable pageable = getPageReqForApplicationSearch(criteria);
 		List<String> applicationIds = criteria.getApplicationIds();
-		Map<String, List<WfStatusEntity>> infos = null;
 		long totalRequestCount = 0;
 		if (CollectionUtils.isEmpty(applicationIds)) {
 			Page<String> applicationIdsPage = wfStatusRepo.getListOfDistinctApplicationUsingDept(criteria.getServiceName(),
@@ -739,57 +738,70 @@ public class WorkflowServiceImpl implements Workflowservice {
 			applicationIds = applicationIdsPage.getContent();
 			totalRequestCount = applicationIdsPage.getTotalElements();
 		}
-		List<WfStatusEntity> wfStatusEntities = null;
-		if (StringUtils.hasLength(criteria.getDeptName())) {
-			if (searchEnabled) {
-				if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(criteria.getServiceName())) {
-					List<String> eligibleServiceNames = new ArrayList<>();
-					eligibleServiceNames.add(Constants.ONE_STEP_MDO_APPROVAL);
-					eligibleServiceNames.add(Constants.ONE_STEP_PC_APPROVAL);
-					eligibleServiceNames.add(Constants.TWO_STEP_MDO_AND_PC_APPROVAL);
-					eligibleServiceNames.add(Constants.TWO_STEP_PC_AND_MDO_APPROVAL);
-					eligibleServiceNames.add(Constants.BLENDED_PROGRAM_SERVICE_NAME);
-					wfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndApplicationId(eligibleServiceNames, criteria.getApplicationStatus(), applicationIds,criteria.getDeptName());
-				} else {
-					Page<WfStatusEntity> paginatedWfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNamePaginatedList(criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), pageable);
-					wfStatusEntities = paginatedWfStatusEntities.getContent();
-				}
-			} else {
-				wfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndApplicationIdIn(
-						criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), applicationIds);
-			}
-		} else {
-			if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(criteria.getServiceName())) {
-				List<String> eligibleServiceNames = new ArrayList<>();
-				eligibleServiceNames.add(Constants.ONE_STEP_MDO_APPROVAL);
-				eligibleServiceNames.add(Constants.ONE_STEP_PC_APPROVAL);
-				eligibleServiceNames.add(Constants.TWO_STEP_MDO_AND_PC_APPROVAL);
-				eligibleServiceNames.add(Constants.TWO_STEP_PC_AND_MDO_APPROVAL);
-				eligibleServiceNames.add(Constants.BLENDED_PROGRAM_SERVICE_NAME);
-				wfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationId(eligibleServiceNames, criteria.getApplicationStatus(), applicationIds);
-			}else {
-				wfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationIdIn(
-						criteria.getServiceName(), criteria.getApplicationStatus(), applicationIds);
-			}
-		}
-		if (criteria.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
-			infos = wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getUserId));
-			if (StringUtil.isNotBlank(criteria.getUserId())) {
-				List<WfStatusEntity> matchedInfo = infos.get(criteria.getUserId());
-				infos.clear();
-				if (matchedInfo != null) {
-					infos.put(criteria.getUserId(), matchedInfo);
-				}
-			}
-		} else {
-			infos = wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getApplicationId));
-		}
+		List<WfStatusEntity> wfStatusEntities = resolveWfStatusEntitiesForSearch(criteria, applicationIds, pageable, searchEnabled);
+		Map<String, List<WfStatusEntity>> infos = buildInfosMap(criteria, wfStatusEntities);
 		Response response = new Response();
 		response.put(Constants.MESSAGE, Constants.SUCCESSFUL);
 		response.put(Constants.DATA, infos);
 		response.put(Constants.STATUS, HttpStatus.OK);
 		response.put(Constants.COUNT,totalRequestCount);
 		return response;
+	}
+
+	private List<WfStatusEntity> resolveWfStatusEntitiesForSearch(SearchCriteria criteria, List<String> applicationIds,
+			Pageable pageable, boolean searchEnabled) {
+		if (StringUtils.hasLength(criteria.getDeptName())) {
+			return resolveWfStatusEntitiesWithDept(criteria, applicationIds, pageable, searchEnabled);
+		}
+		return resolveWfStatusEntitiesWithoutDept(criteria, applicationIds);
+	}
+
+	private List<WfStatusEntity> resolveWfStatusEntitiesWithDept(SearchCriteria criteria, List<String> applicationIds,
+			Pageable pageable, boolean searchEnabled) {
+		if (!searchEnabled) {
+			return wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndApplicationIdIn(
+					criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), applicationIds);
+		}
+		if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(criteria.getServiceName())) {
+			List<String> eligibleServiceNames = buildBlendedProgramEligibleServiceNames();
+			return wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndApplicationId(eligibleServiceNames, criteria.getApplicationStatus(), applicationIds,criteria.getDeptName());
+		}
+		Page<WfStatusEntity> paginatedWfStatusEntities = wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNamePaginatedList(criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), pageable);
+		return paginatedWfStatusEntities.getContent();
+	}
+
+	private List<WfStatusEntity> resolveWfStatusEntitiesWithoutDept(SearchCriteria criteria, List<String> applicationIds) {
+		if (Constants.BLENDED_PROGRAM_SERVICE_NAME.equalsIgnoreCase(criteria.getServiceName())) {
+			List<String> eligibleServiceNames = buildBlendedProgramEligibleServiceNames();
+			return wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationId(eligibleServiceNames, criteria.getApplicationStatus(), applicationIds);
+		}
+		return wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationIdIn(
+				criteria.getServiceName(), criteria.getApplicationStatus(), applicationIds);
+	}
+
+	private List<String> buildBlendedProgramEligibleServiceNames() {
+		List<String> eligibleServiceNames = new ArrayList<>();
+		eligibleServiceNames.add(Constants.ONE_STEP_MDO_APPROVAL);
+		eligibleServiceNames.add(Constants.ONE_STEP_PC_APPROVAL);
+		eligibleServiceNames.add(Constants.TWO_STEP_MDO_AND_PC_APPROVAL);
+		eligibleServiceNames.add(Constants.TWO_STEP_PC_AND_MDO_APPROVAL);
+		eligibleServiceNames.add(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+		return eligibleServiceNames;
+	}
+
+	private Map<String, List<WfStatusEntity>> buildInfosMap(SearchCriteria criteria, List<WfStatusEntity> wfStatusEntities) {
+		if (!criteria.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
+			return wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getApplicationId));
+		}
+		Map<String, List<WfStatusEntity>> infos = wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getUserId));
+		if (StringUtil.isNotBlank(criteria.getUserId())) {
+			List<WfStatusEntity> matchedInfo = infos.get(criteria.getUserId());
+			infos.clear();
+			if (matchedInfo != null) {
+				infos.put(criteria.getUserId(), matchedInfo);
+			}
+		}
+		return infos;
 	}
 
 	private String getDepartmentDetails(HashMap<String, Object> updatedDeptvalue) {
@@ -1287,6 +1299,10 @@ public class WorkflowServiceImpl implements Workflowservice {
 		return responseEntity;
 	}
 
+	private record ApplicationIdResolution(List<String> applicationIds, long totalSearchCount,
+			long totalResponseCount, Response errorResponse) {
+	}
+
 	@Override
 	public Response getUserProfileApprovalRequest(String rootOrg, String org, SearchCriteria criteria, String rootOrgId) {
 		Response response = new Response();
@@ -1296,33 +1312,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 				return applicationsSearch(rootOrg, org, criteria);
 			}
 
-			long totalSearchCount = 0;
-			long totalResponseCount = 0;
 			Pageable pageable = getPageReqForApplicationSearch(criteria);
-			List<String> applicationIds = criteria.getApplicationIds();
-			List<Map<String, Object>> userProfiles;
 			Map<String, Object> userInfoMap = new HashMap<>();
-			if (StringUtil.isNotBlank(criteria.getQuery())
-					&& criteria.getServiceName().equals(Constants.PROFILE_SERVICE_NAME)) {
-				if (isRootOrgRequiredButMissing(rootOrgId, criteria)) {
-					response.setResponseCode(HttpStatus.BAD_REQUEST);
-					response.put(Constants.MESSAGE, Constants.ROOT_ORG_ERROR_MESSAGE);
-					response.put(Constants.STATUS, HttpStatus.BAD_REQUEST);
-					return response;
-				}
-				totalSearchCount = eServiceManager.searchUsers(criteria.getQuery(), (int) pageable.getOffset(),
-						pageable.getPageSize(), userInfoMap, criteria.getDeptName(),
-						criteria.getRequestType());
-				applicationIds = new ArrayList<>(userInfoMap.keySet());
-				log.info(
-						"ES returns {} number of userId for search using query: {}, departmentName: {} and requestTypes: {}",
-						userInfoMap.size(), criteria.getQuery(), criteria.getDeptName(),
-						criteria.getRequestType());
-			} else if (CollectionUtils.isEmpty(applicationIds)) {
-				Map.Entry<List<String>, Long> applicationIdsAndCount = resolveApplicationIdsFromDb(criteria, pageable);
-				applicationIds = applicationIdsAndCount.getKey();
-				totalResponseCount = applicationIdsAndCount.getValue();
+			ApplicationIdResolution resolution = resolveApplicationIdsForApproval(criteria, rootOrgId, pageable, userInfoMap);
+			if (resolution.errorResponse() != null) {
+				return resolution.errorResponse();
 			}
+			List<String> applicationIds = resolution.applicationIds();
+			long totalResponseCount = resolution.totalResponseCount();
 
 			List<WfStatusEntity> wfStatusEntities = new ArrayList<>();
 			if (StringUtils.hasLength(criteria.getDeptName()) && !CollectionUtils.isEmpty(applicationIds)) {
@@ -1330,27 +1327,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 						criteria.getServiceName(), criteria.getApplicationStatus(), criteria.getDeptName(), applicationIds, criteria.getRequestType());
 			}
 
-			if (StringUtil.isNotBlank(criteria.getQuery())) {
-				// If query is present - we already searched the ES and got the details. Just
-				// add the wf details and return the data.
-				userProfiles = buildEsUserProfilesSortedBySearchScore(wfStatusEntities, userInfoMap);
-			} else {
-				userProfiles = CollectionUtils.isEmpty(wfStatusEntities) ?
-						Collections.emptyList() :
-						userProfileWfService.enrichUserData(wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getApplicationId)), rootOrg);
-
-				if (criteria.getSortBy() != null && !criteria.getSortBy().isEmpty()) {
-					log.info("sortBy invoked {}", userProfiles);
-					userProfiles = sortDataByCriteria(userProfiles, criteria);
-				}
-			}
+			List<Map<String, Object>> userProfiles = buildUserProfilesForApproval(criteria, wfStatusEntities, userInfoMap, rootOrg);
 
 			response.put(Constants.MESSAGE, Constants.SUCCESSFUL);
 			response.put(Constants.DATA, userProfiles);
 			response.put(Constants.STATUS, HttpStatus.OK);
 			if (StringUtil.isNotBlank(criteria.getQuery())) {
 				//If search query is present -- we need to return what is the count for search
-				totalResponseCount = totalSearchCount;
+				totalResponseCount = resolution.totalSearchCount();
 			}
 			response.put(Constants.COUNT, totalResponseCount);
 			this.identifyAndMarkOrgTransferRequest(response);
@@ -1362,6 +1346,53 @@ public class WorkflowServiceImpl implements Workflowservice {
 		}
 
 		return response;
+	}
+
+	private ApplicationIdResolution resolveApplicationIdsForApproval(SearchCriteria criteria, String rootOrgId,
+			Pageable pageable, Map<String, Object> userInfoMap) {
+		if (StringUtil.isNotBlank(criteria.getQuery())
+				&& criteria.getServiceName().equals(Constants.PROFILE_SERVICE_NAME)) {
+			if (isRootOrgRequiredButMissing(rootOrgId, criteria)) {
+				Response errorResponse = new Response();
+				errorResponse.setResponseCode(HttpStatus.BAD_REQUEST);
+				errorResponse.put(Constants.MESSAGE, Constants.ROOT_ORG_ERROR_MESSAGE);
+				errorResponse.put(Constants.STATUS, HttpStatus.BAD_REQUEST);
+				return new ApplicationIdResolution(null, 0, 0, errorResponse);
+			}
+			long totalSearchCount = eServiceManager.searchUsers(criteria.getQuery(), (int) pageable.getOffset(),
+					pageable.getPageSize(), userInfoMap, criteria.getDeptName(),
+					criteria.getRequestType());
+			List<String> applicationIds = new ArrayList<>(userInfoMap.keySet());
+			log.info(
+					"ES returns {} number of userId for search using query: {}, departmentName: {} and requestTypes: {}",
+					userInfoMap.size(), criteria.getQuery(), criteria.getDeptName(),
+					criteria.getRequestType());
+			return new ApplicationIdResolution(applicationIds, totalSearchCount, 0, null);
+		}
+		List<String> applicationIds = criteria.getApplicationIds();
+		if (CollectionUtils.isEmpty(applicationIds)) {
+			Map.Entry<List<String>, Long> applicationIdsAndCount = resolveApplicationIdsFromDb(criteria, pageable);
+			return new ApplicationIdResolution(applicationIdsAndCount.getKey(), 0, applicationIdsAndCount.getValue(), null);
+		}
+		return new ApplicationIdResolution(applicationIds, 0, 0, null);
+	}
+
+	private List<Map<String, Object>> buildUserProfilesForApproval(SearchCriteria criteria,
+			List<WfStatusEntity> wfStatusEntities, Map<String, Object> userInfoMap, String rootOrg) {
+		if (StringUtil.isNotBlank(criteria.getQuery())) {
+			// If query is present - we already searched the ES and got the details. Just
+			// add the wf details and return the data.
+			return buildEsUserProfilesSortedBySearchScore(wfStatusEntities, userInfoMap);
+		}
+		List<Map<String, Object>> userProfiles = CollectionUtils.isEmpty(wfStatusEntities) ?
+				Collections.emptyList() :
+				userProfileWfService.enrichUserData(wfStatusEntities.stream().collect(Collectors.groupingBy(WfStatusEntity::getApplicationId)), rootOrg);
+
+		if (criteria.getSortBy() != null && !criteria.getSortBy().isEmpty()) {
+			log.info("sortBy invoked {}", userProfiles);
+			userProfiles = sortDataByCriteria(userProfiles, criteria);
+		}
+		return userProfiles;
 	}
 
 	private boolean isRootOrgRequiredButMissing(String rootOrgId, SearchCriteria criteria) {

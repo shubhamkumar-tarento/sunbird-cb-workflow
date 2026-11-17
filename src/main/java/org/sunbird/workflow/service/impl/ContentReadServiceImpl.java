@@ -51,7 +51,7 @@ public class ContentReadServiceImpl implements ContentReadService {
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the Org details : {}", e);
+            logger.info("There is a error occured while searching for the Org details : {}", e.getMessage(), e);
         }
         return Collections.emptyMap();
     }

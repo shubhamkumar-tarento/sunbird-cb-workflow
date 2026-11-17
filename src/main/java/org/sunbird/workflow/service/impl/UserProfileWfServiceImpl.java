@@ -159,7 +159,7 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 				}
 				Map<String, Object> objectMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
 				for (Map.Entry<String, Object> entry : objectMap.entrySet())
-					updatedProfileElement.put((String) entry.getKey(), entry.getValue());
+					updatedProfileElement.put(entry.getKey(), entry.getValue());
 				mergeLeaf(existingProfileDetail, updatedProfileElement, wfRequestParamObj.get("fieldKey").toString());
 			}
 		} catch (Exception e) {
@@ -211,32 +211,41 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 
 	public static void mergeLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight, String leafKey) {
 		if (mapLeft.containsKey(leafKey)) {
-			for (Map.Entry<String, Object> entry : mapLeft.entrySet()) {
-				String key = entry.getKey();
-				if (key.equalsIgnoreCase(leafKey) && entry.getValue() instanceof ArrayList) {
-					Set<String> childRequest = mapRight.keySet();
-					for (String keys : childRequest) {
-						List<Map<String, Object>> childExisting = (List<Map<String, Object>>) entry.getValue();
-						Map<String, Object> childExistingIndex = childExisting.get(0);
-						childExistingIndex.put(keys, mapRight.get(keys));
-					}
-				}
-				if (key.equalsIgnoreCase(leafKey) && (entry.getValue() instanceof HashMap)) {
-					entry.setValue(mapRight);
-				}
+			mergeIntoExistingLeaf(mapLeft, mapRight, leafKey);
+		} else if (leafKey.equals(Constants.PROFESSIONAL_DETAILS)) {
+			createProfessionalDetailsLeaf(mapLeft, mapRight);
+		}
+	}
+
+	private static void mergeIntoExistingLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight, String leafKey) {
+		for (Map.Entry<String, Object> entry : mapLeft.entrySet()) {
+			if (!entry.getKey().equalsIgnoreCase(leafKey)) {
+				continue;
 			}
-		} else {
-			if (leafKey.equals(Constants.PROFESSIONAL_DETAILS)) {
-				List<Map<String, Object>> professionalData = new ArrayList<>();
-				Map<String, Object> professionalDataChild = new HashMap<>();
-				Set<String> childRequest = mapRight.keySet();
-				for (String keys : childRequest) {
-					professionalDataChild.put(keys, mapRight.get(keys));
-				}
-				professionalData.add(professionalDataChild);
-				mapLeft.put(Constants.PROFESSIONAL_DETAILS, professionalData);
+			if (entry.getValue() instanceof ArrayList) {
+				mergeIntoArrayListLeaf(mapRight, entry);
+			} else if (entry.getValue() instanceof HashMap) {
+				entry.setValue(mapRight);
 			}
 		}
+	}
+
+	private static void mergeIntoArrayListLeaf(Map<String, Object> mapRight, Map.Entry<String, Object> entry) {
+		List<Map<String, Object>> childExisting = (List<Map<String, Object>>) entry.getValue();
+		Map<String, Object> childExistingIndex = childExisting.get(0);
+		for (String keys : mapRight.keySet()) {
+			childExistingIndex.put(keys, mapRight.get(keys));
+		}
+	}
+
+	private static void createProfessionalDetailsLeaf(Map<String, Object> mapLeft, Map<String, Object> mapRight) {
+		List<Map<String, Object>> professionalData = new ArrayList<>();
+		Map<String, Object> professionalDataChild = new HashMap<>();
+		for (String keys : mapRight.keySet()) {
+			professionalDataChild.put(keys, mapRight.get(keys));
+		}
+		professionalData.add(professionalDataChild);
+		mapLeft.put(Constants.PROFESSIONAL_DETAILS, professionalData);
 	}
 
 	/**

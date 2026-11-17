@@ -740,8 +740,6 @@ class UserProfileWfServiceImplTest {
 
     @Test
     void testUpdateRequestWithWF_ArrayListMatch() {
-        String uuid = "123";
-
         Map<String, Object> existingProfileDetail = new HashMap<>();
         List<Map<String, Object>> fieldData = new ArrayList<>();
         Map<String, Object> item = new HashMap<>();

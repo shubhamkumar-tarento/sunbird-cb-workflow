@@ -115,7 +115,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the user details : {}", e);
+            logger.info("There is a error occured while searching for the user details : {}", e.getMessage(), e);
         }
         return true;
     }
@@ -141,7 +141,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the Org details : {}", e);
+            logger.info("There is a error occured while searching for the Org details : {}", e.getMessage(), e);
         }
         return true;
     }
