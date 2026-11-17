@@ -84,35 +84,10 @@ public class CassandraOperationImpl implements CassandraOperation {
             return processQueryForMultipleInClauses(keyspaceName, tableName, propertyMap, fields);
         }
 
-        // Normal processing for simpler cases
-        Select selectFrom;
-        if (CollectionUtils.isNotEmpty(fields)) {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).columns(fields.toArray(new String[0]));
-        } else {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).all();
-        }
-
-        Select selectQuery = selectFrom;
+        Select selectQuery = buildBaseSelect(keyspaceName, tableName, fields);
         if (MapUtils.isNotEmpty(propertyMap)) {
             for (Entry<String, Object> entry : propertyMap.entrySet()) {
-                if (entry.getValue() instanceof List) {
-                    List<?> list = (List<?>) entry.getValue();
-                    if (CollectionUtils.isNotEmpty(list)) {
-                        // If there's only one value in the list, use equals instead of IN
-                        if (list.size() == 1) {
-                            selectQuery = selectQuery.whereColumn(entry.getKey())
-                                    .isEqualTo(QueryBuilder.literal(list.get(0)));
-                        } else {
-                            List<Term> terms = list.stream()
-                                    .map(QueryBuilder::literal)
-                                    .collect(Collectors.toList());
-                            selectQuery = selectQuery.whereColumn(entry.getKey()).in(terms);
-                        }
-                    }
-                } else {
-                    selectQuery = selectQuery.whereColumn(entry.getKey())
-                            .isEqualTo(QueryBuilder.literal(entry.getValue()));
-                }
+                selectQuery = applyPropertyCondition(selectQuery, entry);
             }
             selectQuery = selectQuery.allowFiltering();
         }
@@ -138,15 +113,7 @@ public class CassandraOperationImpl implements CassandraOperation {
             return processQuery(keyspaceName, tableName, propertyMap, fields);
         }
 
-        // Set up the base query with field selection
-        Select selectFrom;
-        if (CollectionUtils.isNotEmpty(fields)) {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).columns(fields.toArray(new String[0]));
-        } else {
-            selectFrom = QueryBuilder.selectFrom(keyspaceName, tableName).all();
-        }
-
-        Select selectQuery = selectFrom;
+        Select selectQuery = buildBaseSelect(keyspaceName, tableName, fields);
 
         // Create a modified property map without the primary list property
         Map<String, Object> modifiedPropertyMap = new HashMap<>(propertyMap);
@@ -154,25 +121,7 @@ public class CassandraOperationImpl implements CassandraOperation {
 
         // Add all non-list conditions or single-value lists
         for (Entry<String, Object> entry : modifiedPropertyMap.entrySet()) {
-            if (entry.getValue() instanceof List) {
-                List<?> list = (List<?>) entry.getValue();
-                if (CollectionUtils.isNotEmpty(list)) {
-                    if (list.size() == 1) {
-                        // For lists with a single value, use equals
-                        selectQuery = selectQuery.whereColumn(entry.getKey())
-                                .isEqualTo(QueryBuilder.literal(list.get(0)));
-                    } else {
-                        // For other lists, still use IN (but we separated the primary one)
-                        List<Term> terms = list.stream()
-                                .map(QueryBuilder::literal)
-                                .collect(Collectors.toList());
-                        selectQuery = selectQuery.whereColumn(entry.getKey()).in(terms);
-                    }
-                }
-            } else {
-                selectQuery = selectQuery.whereColumn(entry.getKey())
-                        .isEqualTo(QueryBuilder.literal(entry.getValue()));
-            }
+            selectQuery = applyPropertyCondition(selectQuery, entry);
         }
 
         // Add the primary list using IN clause
@@ -188,6 +137,33 @@ public class CassandraOperationImpl implements CassandraOperation {
         selectQuery = selectQuery.allowFiltering();
 
         return selectQuery;
+    }
+
+    private Select buildBaseSelect(String keyspaceName, String tableName, List<String> fields) {
+        if (CollectionUtils.isNotEmpty(fields)) {
+            return QueryBuilder.selectFrom(keyspaceName, tableName).columns(fields.toArray(new String[0]));
+        }
+        return QueryBuilder.selectFrom(keyspaceName, tableName).all();
+    }
+
+    private Select applyPropertyCondition(Select selectQuery, Entry<String, Object> entry) {
+        if (!(entry.getValue() instanceof List)) {
+            return selectQuery.whereColumn(entry.getKey())
+                    .isEqualTo(QueryBuilder.literal(entry.getValue()));
+        }
+        List<?> list = (List<?>) entry.getValue();
+        if (CollectionUtils.isEmpty(list)) {
+            return selectQuery;
+        }
+        // If there's only one value in the list, use equals instead of IN
+        if (list.size() == 1) {
+            return selectQuery.whereColumn(entry.getKey())
+                    .isEqualTo(QueryBuilder.literal(list.get(0)));
+        }
+        List<Term> terms = list.stream()
+                .map(QueryBuilder::literal)
+                .collect(Collectors.toList());
+        return selectQuery.whereColumn(entry.getKey()).in(terms);
     }
 
     public Response insertRecord(String keyspaceName, String tableName, Map<String, Object> request) {

@@ -128,284 +128,28 @@ public class UserBulkUploadService {
         }
     }
 
+    private static final class RowEmailPhoneValidation {
+        String phoneNumber;
+        boolean isEmailValid;
+        boolean isPhoneNumberValid;
+        boolean isEmailOrPhoneNumberExist;
+        Map<String, Object> userDetails;
+    }
+
     private void processBulkUpload(HashMap<String, String> inputDataMap) throws IOException {
         File file = null;
-        int totalRecordsCount = 0;
-        int noOfSuccessfulRecords = 0;
-        int failedRecordsCount = 0;
-        String status = "";
+        BulkUploadCounters counters = new BulkUploadCounters();
+        String status;
         try {
             file = new File(Constants.LOCAL_BASE_PATH + inputDataMap.get(Constants.FILE_NAME));
             if (file.exists() && file.length() > 0) {
-            try (FileInputStream fis = new FileInputStream(file);
-                 XSSFWorkbook wb = new XSSFWorkbook(fis)) {
-                XSSFSheet sheet = wb.getSheetAt(0);
-                Iterator<Row> rowIterator = sheet.iterator();
-                // incrementing the iterator inorder to skip the headers in the first row
-                if (rowIterator.hasNext()) {
-                    Row firstRow = rowIterator.next();
-                    Cell statusCell = firstRow.getCell(14);
-                    Cell errorDetails = firstRow.getCell(15);
-                    if (statusCell == null) {
-                        statusCell = firstRow.createCell(14);
-                    }
-                    if (errorDetails == null) {
-                        errorDetails = firstRow.createCell(15);
-                    }
-                    statusCell.setCellValue(Constants.STATUS_BULK_UPLOAD);
-                    errorDetails.setCellValue(Constants.ERROR_DETAILS);
-                }
-                int count = 0;
-                while (rowIterator.hasNext()) {
-                    logger.info("UserBulkUploadService:: Record {}" , count++);
-                    long duration = 0;
-                    long startTime = System.currentTimeMillis();
-                    StringBuilder str = new StringBuilder();
-                    List<String> errList = new ArrayList<>();
-                    Row nextRow = rowIterator.next();
-                    if (nextRow == null) {
-                        break;
-                    } else{
-                        boolean emailCellExists = true;
-                        boolean phoneCellExists = true;
-                        if(nextRow.getCell(1) == null)
-                            emailCellExists = false;
-                        if(nextRow.getCell(2) == null)
-                            phoneCellExists  = false;
-                        if(nextRow.getCell(1) != null && nextRow.getCell(1).getCellType() == CellType.BLANK)
-                            emailCellExists = false;
-                        if(nextRow.getCell(2) != null && nextRow.getCell(2).getCellType() == CellType.BLANK)
-                            phoneCellExists = false;
-                        if(!emailCellExists && !phoneCellExists)
-                            break;
-                    }
-                    Map<String, Object> valuesToBeUpdate = new HashMap<>();
-                    Map<String, Object> userDetails = null;
-                    Map<String, Object> userDetailsForMobile = null;
-                    Map<String, Object> filters = null;
-                    boolean isEmailOrPhoneNumberExist = false;
-                    boolean isEmailValid = false;
-                    boolean isPhoneNumberValid = false;
-                    Cell statusCell = nextRow.getCell(14);
-                    if (statusCell == null) {
-                        statusCell = nextRow.createCell(14);
-                    }
-                    Cell errorDetails = nextRow.getCell(15);
-                    if (errorDetails == null) {
-                        errorDetails = nextRow.createCell(15);
-                    }
-                    String email = "";
-                    if (nextRow.getCell(1) != null && nextRow.getCell(1).getCellType() != CellType.BLANK) {
-                        email = nextRow.getCell(1).getStringCellValue().trim();
-                        if(ValidationUtil.validateEmailPattern(email)){
-                            userDetails = new HashMap<>();
-                            filters = new HashMap<>();
-                            filters.put(Constants.EMAIL, email);
-                            isEmailValid = this.verifyUserRecordExists(filters, userDetails);
-                        } else{
-                            errList.add("The Email provided in Invalid");
-                        }
-                    }
-                    String phoneNumber = null;
-                    boolean isValidPhoneNumber = false;
-                    if (nextRow.getCell(2) != null && nextRow.getCell(2).getCellType() != CellType.BLANK) {
-                        if (nextRow.getCell(2).getCellType() == CellType.NUMERIC) {
-                            phoneNumber = NumberToTextConverter.toText(nextRow.getCell(2).getNumericCellValue());
-                        } else if (nextRow.getCell(2).getCellType() == CellType.STRING) {
-                            phoneNumber = nextRow.getCell(2).getStringCellValue().trim();
-                        } else {
-                            errList.add("Invalid Value of Mobile Number. Expecting number/string format");
-                        }
-                    } else {
-                        errList.add("Mobile Number is Missing");
-                    }
-                    if (StringUtils.hasLength(phoneNumber)) {
-                        isValidPhoneNumber = ValidationUtil.validateContactPattern(phoneNumber);
-                        if (isValidPhoneNumber) {
-                            userDetailsForMobile = new HashMap<>();
-                            filters = new HashMap<>();
-                            filters.put(Constants.PHONE, phoneNumber);
-                            isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
-                        } else {
-                            errList.add("The Mobile Number provided is Invalid");
-                        }
-                    }
-                    if (StringUtils.hasLength(phoneNumber) && isEmailValid) {
-                        filters = new HashMap<>();
-                        filters.put(Constants.EMAIL, email);
-                        filters.put(Constants.PHONE, phoneNumber);
-                        isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, userDetails);
-                    }
-                    if (!CollectionUtils.isEmpty(errList)) {
-                        this.setErrorDetails(str, errList, statusCell, errorDetails);
-                        failedRecordsCount++;
-                        totalRecordsCount++;
-                        continue;
-                    }
-                    if(!isEmailValid){
-                        errList.add("User record does not exist with given email and/or Mobile Number");
-                    } else if (!isEmailOrPhoneNumberExist && isPhoneNumberValid) {
-                        errList.add("Another user record exist with the mobile number");
-                    } else {
-                        errList.clear();
-                        String userRootOrgId = (String) userDetails.get(Constants.ROOT_ORG_ID);
-                        String mdoAdminRootOrgId = inputDataMap.get(Constants.ROOT_ORG_ID);
-                        if (!mdoAdminRootOrgId.equalsIgnoreCase(userRootOrgId)) {
-                            errList.add(DIFFERENT_MDO_ORG_ERROR);
-                            this.setErrorDetails(str, errList, statusCell, errorDetails);
-                            failedRecordsCount++;
-                            totalRecordsCount++;
-                            continue;
-                        }
-                    }
-                    if(!CollectionUtils.isEmpty(errList)){
-                        this.setErrorDetails(str, errList, statusCell, errorDetails);
-                        failedRecordsCount++;
-                        totalRecordsCount++;
-                        continue;
-                    }
-                    validateFullNameColumn(nextRow, valuesToBeUpdate, errList);
-                    if (!isEmailOrPhoneNumberExist) {
-                        valuesToBeUpdate.put(Constants.MOBILE, phoneNumber);
-                    }
-                    validateGroupColumn(nextRow, valuesToBeUpdate, errList);
-                    validateDesignationColumn(nextRow, valuesToBeUpdate, errList);
-                    validateGenderColumn(nextRow, valuesToBeUpdate, errList);
-                    validateCategoryColumn(nextRow, valuesToBeUpdate, errList);
-                    validateDobColumn(nextRow, valuesToBeUpdate, errList);
-                    validateMotherTongueColumn(nextRow, valuesToBeUpdate, errList);
-                    validateEmployeeIdColumn(nextRow, valuesToBeUpdate, errList);
-                    validatePinCodeColumn(nextRow, valuesToBeUpdate, errList);
-                    validateExternalSystemIdColumn(nextRow, valuesToBeUpdate, errList);
-                    validateExternalSystemColumn(nextRow, valuesToBeUpdate, errList);
-                    validateTagColumn(nextRow, valuesToBeUpdate, errList);
-                    if(!CollectionUtils.isEmpty(errList)){
-                        this.setErrorDetails(str, errList, statusCell, errorDetails);
-                        failedRecordsCount++;
-                        totalRecordsCount++;
-                        continue;
-                    }
-                    String userId = null;
-                    if(!CollectionUtils.isEmpty(userDetails)){
-                        userId = (String) userDetails.get(Constants.USER_ID);
-                    }
-                    List<WfStatusEntity> userPendingRequest = wfStatusRepo.findByUserIdAndCurrentStatus(userId, true);
-                    boolean userRecordUpdate = true;
-                    if(!CollectionUtils.isEmpty(userPendingRequest)){
-                        for(WfStatusEntity wfStatusEntity : userPendingRequest){
-                            String updateValuesString = wfStatusEntity.getUpdateFieldValues();
-                            List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
-                            Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
-                            for(Map.Entry<String, String> entry : toValue.entrySet()){
-                                if(valuesToBeUpdate.containsKey(entry.getKey())){
-                                    WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
-                                    if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))){
-                                        wfStatusEntity.setCurrentStatus(Constants.APPROVED);
-                                    } else {
-                                        wfStatusEntity.setCurrentStatus(Constants.REJECTED);
-                                    }
-                                    wfStatusEntity.setInWorkflow(false);
-                                    wfStatusRepo.save(wfStatusEntity);
-                                    if (Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
-                                        userProfileWfService.updateUserProfile(wfRequest);
-                                        WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
-                                        if(Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())){
-                                            userRecordUpdate = false;
-                                            this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
-                                        } else{
-                                            statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
-                                        }
-                                        valuesToBeUpdate.remove(entry.getKey());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if(valuesToBeUpdate.isEmpty()){
-                        if(userRecordUpdate)
-                            noOfSuccessfulRecords++;
-                        else
-                            failedRecordsCount++;
-                        totalRecordsCount++;
-                        continue;
-                    }
-
-                    Set<String> employmentDetailsKey = new HashSet<>();
-                    employmentDetailsKey.add(Constants.EMPLOYEE_CODE);
-                    employmentDetailsKey.add(Constants.PIN_CODE);
-
-                    Set<String> professionalDetailsKey = new HashSet<>();
-                    professionalDetailsKey.add(Constants.GROUP);
-                    professionalDetailsKey.add(Constants.DESIGNATION);
-
-                    Set<String> personalDetailsKey = new HashSet<>();
-                    personalDetailsKey.add(Constants.FIRSTNAME);
-                    personalDetailsKey.add(Constants.DOB);
-                    personalDetailsKey.add(Constants.DOMICILE_MEDIUM);
-                    personalDetailsKey.add(Constants.CATEGORY);
-                    personalDetailsKey.add(Constants.GENDER);
-                    personalDetailsKey.add(Constants.MOBILE);
-
-                    WfRequest wfRequest = this.getWFRequest(valuesToBeUpdate, userId);
-                    List<HashMap<String, Object>> updatedValues = new ArrayList<>();
-                    for(Map.Entry<String, Object> entry : valuesToBeUpdate.entrySet()){
-                        String fieldKey;
-                        HashMap<String, Object> updatedValueMap = new HashMap<>();
-                        updatedValueMap.put(entry.getKey(), entry.getValue());
-                        HashMap<String, Object> updateValues = new HashMap<>();
-                        updateValues.put(Constants.FROM_VALUE, new HashMap<>());
-                        updateValues.put(Constants.TO_VALUE, updatedValueMap);
-                        if (employmentDetailsKey.contains(entry.getKey())) {
-                            fieldKey = Constants.EMPLOYMENT_DETAILS;
-                        } else if (professionalDetailsKey.contains(entry.getKey())) {
-                            fieldKey = Constants.PROFESSIONAL_DETAILS;
-                        } else if (personalDetailsKey.contains(entry.getKey())) {
-                            fieldKey = Constants.PERSONAL_DETAILS;
-                        } else {
-                            fieldKey = Constants.ADDITIONAL_PROPERTIES;
-                        }
-                        updateValues.put(Constants.FIELD_KEY, fieldKey);
-                        updatedValues.add(updateValues);
-                        if(null != wfRequest){
-                            wfRequest.setUpdateFieldValues(updatedValues);
-                        }
-                    }
-                    userProfileWfService.updateUserProfileForBulkUpload(wfRequest);
-                    WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
-                    if(null != wfStatusEntityFailed && Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())){
-                        userRecordUpdate = false;
-                    }
-                    if(userRecordUpdate){
-                        noOfSuccessfulRecords++;
-                        errorDetails.setCellValue("NA");
-                        statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
-                    } else {
-                        failedRecordsCount++;
-                        this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
-                    }
-                    totalRecordsCount++;
-                    duration = System.currentTimeMillis() - startTime;
-                    logger.info("UserBulkUploadService:: Record Completed. Time taken: {} milli-seconds", duration);
-                }
-                if (totalRecordsCount == 0) {
-                    XSSFRow row = sheet.createRow(sheet.getLastRowNum() + 1);
-                    Cell statusCell = row.createCell(14);
-                    Cell errorDetails = row.createCell(15);
-                    statusCell.setCellValue(Constants.FAILED_UPPERCASE);
-                    errorDetails.setCellValue(Constants.EMPTY_FILE_FAILED);
-                }
-                status = uploadTheUpdatedFile(file, wb);
-                if (!(Constants.SUCCESSFUL.equalsIgnoreCase(status) && failedRecordsCount == 0
-                        && totalRecordsCount == noOfSuccessfulRecords && totalRecordsCount >= 1)) {
-                    status = Constants.FAILED_UPPERCASE;
-                }
-            }
+                status = processBulkUploadFile(file, inputDataMap, counters);
             } else {
                 logger.info("Error in Process Bulk Upload : The File is not downloaded/present");
                 status = Constants.FAILED_UPPERCASE;
             }
             this.updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
-                    status, totalRecordsCount, noOfSuccessfulRecords, failedRecordsCount);
+                    status, counters.totalRecordsCount, counters.noOfSuccessfulRecords, counters.failedRecordsCount);
         } catch (Exception e) {
             logger.error("Error in Process Bulk Upload {}", e.getMessage(), e);
             this.updateUserBulkUploadStatus(inputDataMap.get(Constants.ROOT_ORG_ID), inputDataMap.get(Constants.IDENTIFIER),
@@ -419,6 +163,299 @@ public class UserBulkUploadService {
                 }
             }
         }
+    }
+
+    private String processBulkUploadFile(File file, HashMap<String, String> inputDataMap, BulkUploadCounters counters) throws IOException {
+        String status;
+        try (FileInputStream fis = new FileInputStream(file);
+             XSSFWorkbook wb = new XSSFWorkbook(fis)) {
+            XSSFSheet sheet = wb.getSheetAt(0);
+            Iterator<Row> rowIterator = sheet.iterator();
+            // incrementing the iterator inorder to skip the headers in the first row
+            writeHeaderRow(rowIterator);
+            int count = 0;
+            while (rowIterator.hasNext()) {
+                logger.info("UserBulkUploadService:: Record {}" , count++);
+                Row nextRow = rowIterator.next();
+                if (!isProcessableRow(nextRow)) {
+                    break;
+                }
+                processBulkUploadRow(nextRow, inputDataMap, counters);
+            }
+            if (counters.totalRecordsCount == 0) {
+                markSheetEmptyFailure(sheet);
+            }
+            status = uploadTheUpdatedFile(file, wb);
+            if (!(Constants.SUCCESSFUL.equalsIgnoreCase(status) && counters.failedRecordsCount == 0
+                    && counters.totalRecordsCount == counters.noOfSuccessfulRecords && counters.totalRecordsCount >= 1)) {
+                status = Constants.FAILED_UPPERCASE;
+            }
+        }
+        return status;
+    }
+
+    private Cell getOrCreateCell(Row row, int index) {
+        Cell cell = row.getCell(index);
+        return cell != null ? cell : row.createCell(index);
+    }
+
+    private void writeHeaderRow(Iterator<Row> rowIterator) {
+        if (!rowIterator.hasNext()) {
+            return;
+        }
+        Row firstRow = rowIterator.next();
+        Cell statusCell = getOrCreateCell(firstRow, 14);
+        Cell errorDetails = getOrCreateCell(firstRow, 15);
+        statusCell.setCellValue(Constants.STATUS_BULK_UPLOAD);
+        errorDetails.setCellValue(Constants.ERROR_DETAILS);
+    }
+
+    private void markSheetEmptyFailure(XSSFSheet sheet) {
+        XSSFRow row = sheet.createRow(sheet.getLastRowNum() + 1);
+        Cell statusCell = row.createCell(14);
+        Cell errorDetails = row.createCell(15);
+        statusCell.setCellValue(Constants.FAILED_UPPERCASE);
+        errorDetails.setCellValue(Constants.EMPTY_FILE_FAILED);
+    }
+
+    private boolean isProcessableRow(Row nextRow) {
+        if (nextRow == null) {
+            return false;
+        }
+        boolean emailCellExists = nextRow.getCell(1) != null && nextRow.getCell(1).getCellType() != CellType.BLANK;
+        boolean phoneCellExists = nextRow.getCell(2) != null && nextRow.getCell(2).getCellType() != CellType.BLANK;
+        return emailCellExists || phoneCellExists;
+    }
+
+    private void recordRowFailure(StringBuilder str, List<String> errList, Cell statusCell, Cell errorDetails, BulkUploadCounters counters) {
+        this.setErrorDetails(str, errList, statusCell, errorDetails);
+        counters.failedRecordsCount++;
+        counters.totalRecordsCount++;
+    }
+
+    private RowEmailPhoneValidation validateEmailAndPhoneForRow(Row nextRow, List<String> errList) {
+        RowEmailPhoneValidation result = new RowEmailPhoneValidation();
+        String email = "";
+        if (nextRow.getCell(1) != null && nextRow.getCell(1).getCellType() != CellType.BLANK) {
+            email = nextRow.getCell(1).getStringCellValue().trim();
+            if (ValidationUtil.validateEmailPattern(email)) {
+                result.userDetails = new HashMap<>();
+                Map<String, Object> filters = new HashMap<>();
+                filters.put(Constants.EMAIL, email);
+                result.isEmailValid = this.verifyUserRecordExists(filters, result.userDetails);
+            } else {
+                errList.add("The Email provided in Invalid");
+            }
+        }
+        String phoneNumber = null;
+        if (nextRow.getCell(2) != null && nextRow.getCell(2).getCellType() != CellType.BLANK) {
+            if (nextRow.getCell(2).getCellType() == CellType.NUMERIC) {
+                phoneNumber = NumberToTextConverter.toText(nextRow.getCell(2).getNumericCellValue());
+            } else if (nextRow.getCell(2).getCellType() == CellType.STRING) {
+                phoneNumber = nextRow.getCell(2).getStringCellValue().trim();
+            } else {
+                errList.add("Invalid Value of Mobile Number. Expecting number/string format");
+            }
+        } else {
+            errList.add("Mobile Number is Missing");
+        }
+        result.phoneNumber = phoneNumber;
+        if (StringUtils.hasLength(phoneNumber)) {
+            boolean isValidPhoneNumber = ValidationUtil.validateContactPattern(phoneNumber);
+            if (isValidPhoneNumber) {
+                Map<String, Object> userDetailsForMobile = new HashMap<>();
+                Map<String, Object> filters = new HashMap<>();
+                filters.put(Constants.PHONE, phoneNumber);
+                result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
+            } else {
+                errList.add("The Mobile Number provided is Invalid");
+            }
+        }
+        if (StringUtils.hasLength(phoneNumber) && result.isEmailValid) {
+            Map<String, Object> filters = new HashMap<>();
+            filters.put(Constants.EMAIL, email);
+            filters.put(Constants.PHONE, phoneNumber);
+            result.isEmailOrPhoneNumberExist = this.verifyUserRecordExists(filters, result.userDetails);
+        }
+        return result;
+    }
+
+    private boolean hasExistenceOrOrgError(RowEmailPhoneValidation validation, HashMap<String, String> inputDataMap, List<String> errList) {
+        if (!validation.isEmailValid) {
+            errList.add("User record does not exist with given email and/or Mobile Number");
+        } else if (!validation.isEmailOrPhoneNumberExist && validation.isPhoneNumberValid) {
+            errList.add("Another user record exist with the mobile number");
+        } else {
+            errList.clear();
+            String userRootOrgId = (String) validation.userDetails.get(Constants.ROOT_ORG_ID);
+            String mdoAdminRootOrgId = inputDataMap.get(Constants.ROOT_ORG_ID);
+            if (!mdoAdminRootOrgId.equalsIgnoreCase(userRootOrgId)) {
+                errList.add(DIFFERENT_MDO_ORG_ERROR);
+            }
+        }
+        return !CollectionUtils.isEmpty(errList);
+    }
+
+    private boolean applyPendingRequestUpdatesForRow(String userId, Map<String, Object> valuesToBeUpdate, StringBuilder str,
+            Cell statusCell, Cell errorDetails) throws IOException {
+        List<WfStatusEntity> userPendingRequest = wfStatusRepo.findByUserIdAndCurrentStatus(userId, true);
+        boolean userRecordUpdate = true;
+        if (CollectionUtils.isEmpty(userPendingRequest)) {
+            return userRecordUpdate;
+        }
+        for (WfStatusEntity wfStatusEntity : userPendingRequest) {
+            String updateValuesString = wfStatusEntity.getUpdateFieldValues();
+            List<Map<String, Object>> updatedValues = mapper.readValue(updateValuesString, List.class);
+            Map<String, String> toValue = (Map<String, String>) updatedValues.get(0).get(Constants.TO_VALUE);
+            for (Map.Entry<String, String> entry : toValue.entrySet()) {
+                if (!valuesToBeUpdate.containsKey(entry.getKey())) {
+                    continue;
+                }
+                WfRequest wfRequest = this.getWFRequest(wfStatusEntity, null);
+                if (entry.getValue().equalsIgnoreCase((String) valuesToBeUpdate.get(entry.getKey()))) {
+                    wfStatusEntity.setCurrentStatus(Constants.APPROVED);
+                } else {
+                    wfStatusEntity.setCurrentStatus(Constants.REJECTED);
+                }
+                wfStatusEntity.setInWorkflow(false);
+                wfStatusRepo.save(wfStatusEntity);
+                if (Constants.APPROVED.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
+                    userProfileWfService.updateUserProfile(wfRequest);
+                    WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
+                    if (Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
+                        userRecordUpdate = false;
+                        this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
+                    } else {
+                        statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
+                    }
+                    valuesToBeUpdate.remove(entry.getKey());
+                }
+            }
+        }
+        return userRecordUpdate;
+    }
+
+    private WfRequest buildWfRequestForRow(Map<String, Object> valuesToBeUpdate, String userId) throws IOException {
+        Set<String> employmentDetailsKey = new HashSet<>();
+        employmentDetailsKey.add(Constants.EMPLOYEE_CODE);
+        employmentDetailsKey.add(Constants.PIN_CODE);
+
+        Set<String> professionalDetailsKey = new HashSet<>();
+        professionalDetailsKey.add(Constants.GROUP);
+        professionalDetailsKey.add(Constants.DESIGNATION);
+
+        Set<String> personalDetailsKey = new HashSet<>();
+        personalDetailsKey.add(Constants.FIRSTNAME);
+        personalDetailsKey.add(Constants.DOB);
+        personalDetailsKey.add(Constants.DOMICILE_MEDIUM);
+        personalDetailsKey.add(Constants.CATEGORY);
+        personalDetailsKey.add(Constants.GENDER);
+        personalDetailsKey.add(Constants.MOBILE);
+
+        WfRequest wfRequest = this.getWFRequest(valuesToBeUpdate, userId);
+        List<HashMap<String, Object>> updatedValues = new ArrayList<>();
+        for (Map.Entry<String, Object> entry : valuesToBeUpdate.entrySet()) {
+            String fieldKey;
+            HashMap<String, Object> updatedValueMap = new HashMap<>();
+            updatedValueMap.put(entry.getKey(), entry.getValue());
+            HashMap<String, Object> updateValues = new HashMap<>();
+            updateValues.put(Constants.FROM_VALUE, new HashMap<>());
+            updateValues.put(Constants.TO_VALUE, updatedValueMap);
+            if (employmentDetailsKey.contains(entry.getKey())) {
+                fieldKey = Constants.EMPLOYMENT_DETAILS;
+            } else if (professionalDetailsKey.contains(entry.getKey())) {
+                fieldKey = Constants.PROFESSIONAL_DETAILS;
+            } else if (personalDetailsKey.contains(entry.getKey())) {
+                fieldKey = Constants.PERSONAL_DETAILS;
+            } else {
+                fieldKey = Constants.ADDITIONAL_PROPERTIES;
+            }
+            updateValues.put(Constants.FIELD_KEY, fieldKey);
+            updatedValues.add(updateValues);
+            if (null != wfRequest) {
+                wfRequest.setUpdateFieldValues(updatedValues);
+            }
+        }
+        return wfRequest;
+    }
+
+    private boolean applyProfileUpdateForRow(WfRequest wfRequest, boolean userRecordUpdate) {
+        userProfileWfService.updateUserProfileForBulkUpload(wfRequest);
+        WfStatusEntity wfStatusEntityFailed = wfStatusRepo.findByWfId(wfRequest.getWfId());
+        if (null != wfStatusEntityFailed && Constants.REJECTED.equalsIgnoreCase(wfStatusEntityFailed.getCurrentStatus())) {
+            return false;
+        }
+        return userRecordUpdate;
+    }
+
+    private void finalizeRowWithProfileUpdate(boolean userRecordUpdate, StringBuilder str, Cell statusCell, Cell errorDetails, BulkUploadCounters counters) {
+        if (userRecordUpdate) {
+            counters.noOfSuccessfulRecords++;
+            errorDetails.setCellValue("NA");
+            statusCell.setCellValue(Constants.SUCCESS_UPPERCASE);
+        } else {
+            counters.failedRecordsCount++;
+            this.setErrorDetails(str, Collections.singletonList(Constants.UPDATE_FAILED), statusCell, errorDetails);
+        }
+        counters.totalRecordsCount++;
+    }
+
+    private void processBulkUploadRow(Row nextRow, HashMap<String, String> inputDataMap, BulkUploadCounters counters) throws IOException {
+        long startTime = System.currentTimeMillis();
+        StringBuilder str = new StringBuilder();
+        List<String> errList = new ArrayList<>();
+        Map<String, Object> valuesToBeUpdate = new HashMap<>();
+        Cell statusCell = getOrCreateCell(nextRow, 14);
+        Cell errorDetails = getOrCreateCell(nextRow, 15);
+
+        RowEmailPhoneValidation validation = validateEmailAndPhoneForRow(nextRow, errList);
+        if (!CollectionUtils.isEmpty(errList)) {
+            recordRowFailure(str, errList, statusCell, errorDetails, counters);
+            return;
+        }
+        if (hasExistenceOrOrgError(validation, inputDataMap, errList)) {
+            recordRowFailure(str, errList, statusCell, errorDetails, counters);
+            return;
+        }
+
+        validateFullNameColumn(nextRow, valuesToBeUpdate, errList);
+        if (!validation.isEmailOrPhoneNumberExist) {
+            valuesToBeUpdate.put(Constants.MOBILE, validation.phoneNumber);
+        }
+        validateGroupColumn(nextRow, valuesToBeUpdate, errList);
+        validateDesignationColumn(nextRow, valuesToBeUpdate, errList);
+        validateGenderColumn(nextRow, valuesToBeUpdate, errList);
+        validateCategoryColumn(nextRow, valuesToBeUpdate, errList);
+        validateDobColumn(nextRow, valuesToBeUpdate, errList);
+        validateMotherTongueColumn(nextRow, valuesToBeUpdate, errList);
+        validateEmployeeIdColumn(nextRow, valuesToBeUpdate, errList);
+        validatePinCodeColumn(nextRow, valuesToBeUpdate, errList);
+        validateExternalSystemIdColumn(nextRow, valuesToBeUpdate, errList);
+        validateExternalSystemColumn(nextRow, valuesToBeUpdate, errList);
+        validateTagColumn(nextRow, valuesToBeUpdate, errList);
+        if (!CollectionUtils.isEmpty(errList)) {
+            recordRowFailure(str, errList, statusCell, errorDetails, counters);
+            return;
+        }
+
+        String userId = CollectionUtils.isEmpty(validation.userDetails) ? null : (String) validation.userDetails.get(Constants.USER_ID);
+        boolean userRecordUpdate = applyPendingRequestUpdatesForRow(userId, valuesToBeUpdate, str, statusCell, errorDetails);
+        if (valuesToBeUpdate.isEmpty()) {
+            if (userRecordUpdate) {
+                counters.noOfSuccessfulRecords++;
+            } else {
+                counters.failedRecordsCount++;
+            }
+            counters.totalRecordsCount++;
+            return;
+        }
+
+        WfRequest wfRequest = buildWfRequestForRow(valuesToBeUpdate, userId);
+        userRecordUpdate = applyProfileUpdateForRow(wfRequest, userRecordUpdate);
+        finalizeRowWithProfileUpdate(userRecordUpdate, str, statusCell, errorDetails, counters);
+
+        long duration = System.currentTimeMillis() - startTime;
+        logger.info("UserBulkUploadService:: Record Completed. Time taken: {} milli-seconds", duration);
     }
 
     private void validateFullNameColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
@@ -450,21 +487,28 @@ public class UserBulkUploadService {
     }
 
     private void validateDesignationColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (nextRow.getCell(4) != null && nextRow.getCell(4).getCellType() != CellType.BLANK) {
-            if (nextRow.getCell(4).getCellType() == CellType.STRING) {
-                String designation = nextRow.getCell(4).getStringCellValue().trim();
-                valuesToBeUpdate.put(Constants.DESIGNATION, designation);
-                if (org.apache.commons.lang.StringUtils.isNotBlank(designation)) {
-                    if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(designation)) {
-                        errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
-                    }
-                    if(this.validateDesignationFieldValue(designation)){
-                        errList.add("Invalid Value of Designation, please choose a valid value from the default list");
-                    }
-                }
-            } else {
-                errList.add("Invalid value for Designation type. Expecting string format");
-            }
+        Cell cell = nextRow.getCell(4);
+        if (cell == null || cell.getCellType() == CellType.BLANK) {
+            return;
+        }
+        if (cell.getCellType() != CellType.STRING) {
+            errList.add("Invalid value for Designation type. Expecting string format");
+            return;
+        }
+        String designation = cell.getStringCellValue().trim();
+        valuesToBeUpdate.put(Constants.DESIGNATION, designation);
+        validateDesignationValue(designation, errList);
+    }
+
+    private void validateDesignationValue(String designation, List<String> errList) {
+        if (!org.apache.commons.lang.StringUtils.isNotBlank(designation)) {
+            return;
+        }
+        if (!ValidationUtil.validateRegexPatternWithNoSpecialCharacter(designation)) {
+            errList.add("Invalid Designation: Designation should be added from default list and cannot contain special character");
+        }
+        if (this.validateDesignationFieldValue(designation)) {
+            errList.add("Invalid Value of Designation, please choose a valid value from the default list");
         }
     }
 
@@ -498,29 +542,40 @@ public class UserBulkUploadService {
     }
 
     private void validateDobColumn(Row nextRow, Map<String, Object> valuesToBeUpdate, List<String> errList) {
-        if (nextRow.getCell(7) != null && nextRow.getCell(7).getCellType() != CellType.BLANK) {
-            if (nextRow.getCell(7).getCellType() == CellType.STRING) {
-                if (ValidationUtil.validateDate(nextRow.getCell(7).getStringCellValue().trim())) {
-                    valuesToBeUpdate.put(Constants.DOB, nextRow.getCell(7).getStringCellValue().trim());
-                } else {
-                    errList.add(INVALID_DOB_FORMAT_ERROR);
-                }
-            } else if (nextRow.getCell(7).getCellType() == CellType.NUMERIC) {
-                if (DateUtil.isCellDateFormatted(nextRow.getCell(7))) {
-                    Date date = nextRow.getCell(7).getDateCellValue();
-                    SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
-                    String dob = dateFormat.format(date);
-                    if (ValidationUtil.validateDate(dob)) {
-                        valuesToBeUpdate.put(Constants.DOB, dob);
-                    } else {
-                        errList.add(INVALID_DOB_FORMAT_ERROR);
-                    }
-                } else {
-                    errList.add("Cell is numeric but not a date.");
-                }
-            } else {
-                errList.add("Invalid value for Date of Birth type. Expecting string format");
-            }
+        Cell cell = nextRow.getCell(7);
+        if (cell == null || cell.getCellType() == CellType.BLANK) {
+            return;
+        }
+        if (cell.getCellType() == CellType.STRING) {
+            validateDobStringCell(cell, valuesToBeUpdate, errList);
+        } else if (cell.getCellType() == CellType.NUMERIC) {
+            validateDobNumericCell(cell, valuesToBeUpdate, errList);
+        } else {
+            errList.add("Invalid value for Date of Birth type. Expecting string format");
+        }
+    }
+
+    private void validateDobStringCell(Cell cell, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        String dob = cell.getStringCellValue().trim();
+        if (ValidationUtil.validateDate(dob)) {
+            valuesToBeUpdate.put(Constants.DOB, dob);
+        } else {
+            errList.add(INVALID_DOB_FORMAT_ERROR);
+        }
+    }
+
+    private void validateDobNumericCell(Cell cell, Map<String, Object> valuesToBeUpdate, List<String> errList) {
+        if (!DateUtil.isCellDateFormatted(cell)) {
+            errList.add("Cell is numeric but not a date.");
+            return;
+        }
+        Date date = cell.getDateCellValue();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy");
+        String dob = dateFormat.format(date);
+        if (ValidationUtil.validateDate(dob)) {
+            valuesToBeUpdate.put(Constants.DOB, dob);
+        } else {
+            errList.add(INVALID_DOB_FORMAT_ERROR);
         }
     }
 

@@ -697,25 +697,28 @@ public class WorkFlowServiceImplV2 implements WorkFlowServiceV2 {
 
         try  {
             String cachedData = redisCacheMgr.getContentFromCache(key);
-            if (cachedData != null) {
-                ObjectNode profileNode = (ObjectNode) mapper.readTree(cachedData);
-
-                if (profileNode != null && profileNode.has(Constants.PROFESSIONAL_DETAILS)) {
-                    ArrayNode professionalDetailsArray = (ArrayNode) profileNode.get(Constants.PROFESSIONAL_DETAILS);
-
-                    for (JsonNode profDetail : professionalDetailsArray) {
-                        ObjectNode profDetailObj = (ObjectNode) profDetail;
-                        if (group != null) profDetailObj.put(Constants.GROUP, group);
-                        if (designation != null) profDetailObj.put(Constants.DESIGNATION, designation);
-                    }
-                }
-
-                redisCacheMgr.putInBasicProfileCache(key, mapper.writeValueAsString(profileNode), configuration.getBasicProfileCacheTtl());
-            } else {
+            if (cachedData == null) {
                 logger.warn("No cache found for user {}", userId);
+                return;
             }
+            ObjectNode profileNode = (ObjectNode) mapper.readTree(cachedData);
+            applyProfessionalDetailsUpdate(profileNode, group, designation);
+            redisCacheMgr.putInBasicProfileCache(key, mapper.writeValueAsString(profileNode), configuration.getBasicProfileCacheTtl());
         } catch (Exception e) {
             logger.error("Error updating professionalDetails in Redis cache", e);
+        }
+    }
+
+    private void applyProfessionalDetailsUpdate(ObjectNode profileNode, String group, String designation) {
+        if (profileNode == null || !profileNode.has(Constants.PROFESSIONAL_DETAILS)) {
+            return;
+        }
+        ArrayNode professionalDetailsArray = (ArrayNode) profileNode.get(Constants.PROFESSIONAL_DETAILS);
+
+        for (JsonNode profDetail : professionalDetailsArray) {
+            ObjectNode profDetailObj = (ObjectNode) profDetail;
+            if (group != null) profDetailObj.put(Constants.GROUP, group);
+            if (designation != null) profDetailObj.put(Constants.DESIGNATION, designation);
         }
     }
 

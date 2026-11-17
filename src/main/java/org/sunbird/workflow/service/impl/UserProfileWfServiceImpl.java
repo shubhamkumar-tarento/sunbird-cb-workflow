@@ -127,46 +127,65 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		try {
 			// merge wfRequestParamList and existingProfileDetail to add osid(s)
 			for (Map<String, Object> wfRequestParamObj : wfRequestParamList) {
-				String osid = wfRequestParamObj.get(Constants.OSID) == null ? "" : wfRequestParamObj.get(Constants.OSID).toString();
-				Map<String, Object> updatedProfileElement = new HashMap<>();
-				Object updatedProfileElementObj = existingProfileDetail.get(wfRequestParamObj.get(Constants.FIELD_KEY));
-				if (updatedProfileElementObj instanceof ArrayList) {
-					List<Map<String, Object>> existingProfileElementList = mapper.convertValue(updatedProfileElementObj, ArrayList.class);
-					for (Map<String, Object> existingProfileElement : existingProfileElementList) {
-						if (existingProfileElement.get(Constants.OSID) != null
-								&& existingProfileElement.get(Constants.OSID).toString().equalsIgnoreCase(osid))
-							updatedProfileElement.putAll(existingProfileElement);
-					}
-				} else if (updatedProfileElementObj instanceof HashMap) {
-					Map<String, Object> existingProfileElementList = mapper.convertValue(updatedProfileElementObj, Map.class);
-					updatedProfileElement.putAll(existingProfileElementList);
-				} else if (updatedProfileElementObj instanceof Boolean) {
-					Map<String,Object> toValueMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
-					existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), (Boolean) toValueMap.get(Constants.VERIFIED_KARMAYOGI));
-				} else if (null == updatedProfileElementObj) {
-					if (Constants.VERIFIED_KARMAYOGI.equalsIgnoreCase((String) wfRequestParamObj.get(Constants.FIELD_KEY))) {
-						Map<String,Object> toValueMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
-						existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), (Boolean) toValueMap.get(Constants.VERIFIED_KARMAYOGI));
-					} else if (Constants.PROFESSIONAL_DETAILS.equalsIgnoreCase((String) wfRequestParamObj.get(Constants.FIELD_KEY))) {
-						List<Map<String, Object>> detailsList = new ArrayList<>();
-						Map<String, Object> detailsMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
-						detailsList.add(detailsMap);
-						existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), detailsList);
-					} else {
-						logger.error("profile element to be updated is neither arraylist nor hashmap");
-						return null;
-					}
+				if (!mergeWfRequestParamIntoProfile(wfRequestParamObj, existingProfileDetail)) {
+					return null;
 				}
-				Map<String, Object> objectMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
-				for (Map.Entry<String, Object> entry : objectMap.entrySet())
-					updatedProfileElement.put(entry.getKey(), entry.getValue());
-				mergeLeaf(existingProfileDetail, updatedProfileElement, wfRequestParamObj.get("fieldKey").toString());
 			}
 		} catch (Exception e) {
 			logger.error("Merge profile exception:: {}", e.getMessage(), e);
 		}
 		updateProfileVerificationStatus(existingProfileDetail);
 		return existingProfileDetail;
+	}
+
+	private boolean mergeWfRequestParamIntoProfile(Map<String, Object> wfRequestParamObj, Map<String, Object> existingProfileDetail) {
+		String osid = wfRequestParamObj.get(Constants.OSID) == null ? "" : wfRequestParamObj.get(Constants.OSID).toString();
+		Map<String, Object> updatedProfileElement = new HashMap<>();
+		Object updatedProfileElementObj = existingProfileDetail.get(wfRequestParamObj.get(Constants.FIELD_KEY));
+		if (updatedProfileElementObj instanceof ArrayList) {
+			mergeArrayListProfileElement(updatedProfileElementObj, osid, updatedProfileElement);
+		} else if (updatedProfileElementObj instanceof HashMap) {
+			Map<String, Object> existingProfileElementList = mapper.convertValue(updatedProfileElementObj, Map.class);
+			updatedProfileElement.putAll(existingProfileElementList);
+		} else if (updatedProfileElementObj instanceof Boolean) {
+			setVerifiedKarmayogiValue(wfRequestParamObj, existingProfileDetail);
+		} else if (null == updatedProfileElementObj && !handleNullProfileElement(wfRequestParamObj, existingProfileDetail)) {
+			return false;
+		}
+		Map<String, Object> objectMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
+		for (Map.Entry<String, Object> entry : objectMap.entrySet())
+			updatedProfileElement.put(entry.getKey(), entry.getValue());
+		mergeLeaf(existingProfileDetail, updatedProfileElement, wfRequestParamObj.get("fieldKey").toString());
+		return true;
+	}
+
+	private void mergeArrayListProfileElement(Object updatedProfileElementObj, String osid, Map<String, Object> updatedProfileElement) {
+		List<Map<String, Object>> existingProfileElementList = mapper.convertValue(updatedProfileElementObj, ArrayList.class);
+		for (Map<String, Object> existingProfileElement : existingProfileElementList) {
+			if (existingProfileElement.get(Constants.OSID) != null
+					&& existingProfileElement.get(Constants.OSID).toString().equalsIgnoreCase(osid))
+				updatedProfileElement.putAll(existingProfileElement);
+		}
+	}
+
+	private void setVerifiedKarmayogiValue(Map<String, Object> wfRequestParamObj, Map<String, Object> existingProfileDetail) {
+		Map<String,Object> toValueMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
+		existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), (Boolean) toValueMap.get(Constants.VERIFIED_KARMAYOGI));
+	}
+
+	private boolean handleNullProfileElement(Map<String, Object> wfRequestParamObj, Map<String, Object> existingProfileDetail) {
+		if (Constants.VERIFIED_KARMAYOGI.equalsIgnoreCase((String) wfRequestParamObj.get(Constants.FIELD_KEY))) {
+			setVerifiedKarmayogiValue(wfRequestParamObj, existingProfileDetail);
+		} else if (Constants.PROFESSIONAL_DETAILS.equalsIgnoreCase((String) wfRequestParamObj.get(Constants.FIELD_KEY))) {
+			List<Map<String, Object>> detailsList = new ArrayList<>();
+			Map<String, Object> detailsMap = (Map<String, Object>) wfRequestParamObj.get(Constants.TO_VALUE);
+			detailsList.add(detailsMap);
+			existingProfileDetail.put((String) wfRequestParamObj.get(Constants.FIELD_KEY), detailsList);
+		} else {
+			logger.error("profile element to be updated is neither arraylist nor hashmap");
+			return false;
+		}
+		return true;
 	}
 
 	private void updateProfileVerificationStatus(Map<String, Object> existingProfileDetail) {
@@ -278,52 +297,58 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	public HashMap<String, Object> getUsersResult(Set<String> userIds) {
 		HashMap<String, Object> userResult = new HashMap<>();
 		Map<String, Object> request = getSearchObject(userIds);
-		HashMap<String, String> headersValue = new HashMap<>();
-		headersValue.put("Content-Type", "application/json");
 		try {
 			StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
 			builder.append(configuration.getLmsUserSearchEndPoint());
 			Map<String, Object> searchProfileApiResp = (Map<String, Object>) requestServiceImpl
 					.fetchResultUsingPost(builder, request, Map.class, getHeaders());
-			if (searchProfileApiResp != null
-					&& "OK".equalsIgnoreCase((String) searchProfileApiResp.get(Constants.RESPONSE_CODE))) {
-				Map<String, Object> map = (Map<String, Object>) searchProfileApiResp.get(Constants.RESULT);
-				Map<String, Object> response = (Map<String, Object>) map.get(Constants.RESPONSE);
-				List<Map<String, Object>> contents = (List<Map<String, Object>>) response.get(Constants.CONTENT);
-				if (!CollectionUtils.isEmpty(contents)) {
-					for (Map<String, Object> content : contents) {
-						HashMap<String, Object> profileDetails = (HashMap<String, Object>) content
-								.get(Constants.PROFILE_DETAILS);
-						HashMap<String, Object> employmentDetails = (HashMap<String, Object>) profileDetails
-								.get(Constants.EMPLOYMENT_DETAILS);
-						if (MapUtils.isNotEmpty(profileDetails)) {
-							HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
-									.get(Constants.PERSONAL_DETAILS);
-							Map<String, Object> userRecord = new HashMap<>();
-							if (MapUtils.isNotEmpty(personalDetails)) {
-								userRecord.put(Constants.UUID, content.get(Constants.USER_ID));
-								userRecord.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
-								userRecord.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
-								userRecord.put(Constants.ROOT_ORG_ID,content.get(Constants.ROOT_ORG_ID));
-								userRecord.put(Constants.MOBILE, personalDetails.get(Constants.MOBILE));
-							}
-							if (MapUtils.isNotEmpty(employmentDetails) && StringUtils.isNotBlank((String) employmentDetails.get(Constants.DEPARTMENT_NAME))) {
-								userRecord.put(Constants.DEPARTMENT_NAME, employmentDetails.get(Constants.DEPARTMENT_NAME));
-							}
-							Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails.get(Constants.ADDITIONAL_PROPERTIES);
-							if (MapUtils.isNotEmpty(additionalProperties)) {
-								userRecord.put(Constants.TAG, additionalProperties.get(Constants.TAG));
-							}
-							userResult.put((String) content.get(Constants.USER_ID), userRecord);
-						}
-					}
-				}
+			for (Map<String, Object> content : extractUserSearchContents(searchProfileApiResp)) {
+				populateUserRecord(content, userResult);
 			}
 		} catch (Exception e) {
 			logger.error("Exception while fetching user setails : ",e);
 			throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
 		}
 		return userResult;
+	}
+
+	private List<Map<String, Object>> extractUserSearchContents(Map<String, Object> searchProfileApiResp) {
+		if (searchProfileApiResp == null
+				|| !"OK".equalsIgnoreCase((String) searchProfileApiResp.get(Constants.RESPONSE_CODE))) {
+			return Collections.emptyList();
+		}
+		Map<String, Object> map = (Map<String, Object>) searchProfileApiResp.get(Constants.RESULT);
+		Map<String, Object> response = (Map<String, Object>) map.get(Constants.RESPONSE);
+		List<Map<String, Object>> contents = (List<Map<String, Object>>) response.get(Constants.CONTENT);
+		return CollectionUtils.isEmpty(contents) ? Collections.emptyList() : contents;
+	}
+
+	private void populateUserRecord(Map<String, Object> content, HashMap<String, Object> userResult) {
+		HashMap<String, Object> profileDetails = (HashMap<String, Object>) content
+				.get(Constants.PROFILE_DETAILS);
+		HashMap<String, Object> employmentDetails = (HashMap<String, Object>) profileDetails
+				.get(Constants.EMPLOYMENT_DETAILS);
+		if (!MapUtils.isNotEmpty(profileDetails)) {
+			return;
+		}
+		HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
+				.get(Constants.PERSONAL_DETAILS);
+		Map<String, Object> userRecord = new HashMap<>();
+		if (MapUtils.isNotEmpty(personalDetails)) {
+			userRecord.put(Constants.UUID, content.get(Constants.USER_ID));
+			userRecord.put(Constants.FIRST_NAME, personalDetails.get(Constants.FIRSTNAME));
+			userRecord.put(Constants.EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+			userRecord.put(Constants.ROOT_ORG_ID,content.get(Constants.ROOT_ORG_ID));
+			userRecord.put(Constants.MOBILE, personalDetails.get(Constants.MOBILE));
+		}
+		if (MapUtils.isNotEmpty(employmentDetails) && StringUtils.isNotBlank((String) employmentDetails.get(Constants.DEPARTMENT_NAME))) {
+			userRecord.put(Constants.DEPARTMENT_NAME, employmentDetails.get(Constants.DEPARTMENT_NAME));
+		}
+		Map<String, Object> additionalProperties = (Map<String, Object>) profileDetails.get(Constants.ADDITIONAL_PROPERTIES);
+		if (MapUtils.isNotEmpty(additionalProperties)) {
+			userRecord.put(Constants.TAG, additionalProperties.get(Constants.TAG));
+		}
+		userResult.put((String) content.get(Constants.USER_ID), userRecord);
 	}
 
 	private Object userProfileRead(String userId) {
@@ -416,44 +441,54 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 	private Map<String, Object> getUpdateRequest(WfRequest wfRequest, Map<String, Object> updateRequest) {
 		Map<String, Object> requestObject = new HashMap<>();
 		Map<String, Object> requestWrapper = new HashMap<>();
-		List<HashMap<String, Object>> valuesToBeUpdate = wfRequest.getUpdateFieldValues();
-		for (Map<String, Object> valueToUpdate : valuesToBeUpdate) {
-			if(valueToUpdate.containsKey(Constants.TO_VALUE)) {
-				Map<String, Object> toValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
-				Optional<String> firstKey = toValue.keySet().stream().findFirst();
-				if (firstKey.isPresent()) {
-					String keyToUpdate = firstKey.get();
-					if (Constants.FIRSTNAME.equalsIgnoreCase(keyToUpdate)) {
-						requestWrapper.put(Constants.FIRST_NAME_CAMEL_CASE, toValue.get(keyToUpdate));
-					}
-					if (Constants.MOBILE.equalsIgnoreCase(keyToUpdate)) {
-						requestWrapper.put(Constants.PHONE, String.valueOf(toValue.get(keyToUpdate)));
-					}
-				}
-			}
-		}
-        Map<String, Object> orgDetails = fetchOrgDetails(wfRequest.getDeptName());
-        if (MapUtils.isNotEmpty(orgDetails)) {
-            Object organisationTypeObj = orgDetails.get(Constants.ORGANISATION_TYPE);
-            if (org.apache.commons.lang3.ObjectUtils.isNotEmpty(organisationTypeObj)) {
-                String organisationType = organisationTypeObj.toString();
-                if (stateOrMinistry.contains(organisationType)) {
-                    updateRequest.put(Constants.MINISTRYORSTATEID, String.valueOf(orgDetails.get(Constants.ROOT_ORG_ID)));
-                    updateRequest.put(Constants.MINISTRYORSTATEORGNAME, String.valueOf(orgDetails.get(Constants.ORG_NAME)));
-                } else if (Constants.SPV_ORGTYPEVALUE.equalsIgnoreCase(organisationType)) {
-                    logger.warn("Organisation type is SPV, hence not updating ministry or state details");
-                } else {
-                    updateRequest.put(Constants.MINISTRYORSTATEID, String.valueOf(orgDetails.get(Constants.MINISTRYORSTATEID)));
-                    updateRequest.put(Constants.MINISTRYORSTATEORGNAME, String.valueOf(orgDetails.get(Constants.MINISTRYORSTATENAME)));
-                }
-            }
-        } else {
-            logger.warn("Organisation details not found for deptName: {}",wfRequest.getDeptName());
-        }
+		applyNameAndPhoneUpdates(wfRequest.getUpdateFieldValues(), requestWrapper);
+		applyMinistryOrStateDetails(wfRequest, updateRequest);
 		requestWrapper.put(Constants.USER_ID, wfRequest.getApplicationId());
 		requestWrapper.put(Constants.PROFILE_DETAILS, updateRequest);
 		requestObject.put(Constants.REQUEST, requestWrapper);
 		return requestObject;
+	}
+
+	private void applyNameAndPhoneUpdates(List<HashMap<String, Object>> valuesToBeUpdate, Map<String, Object> requestWrapper) {
+		for (Map<String, Object> valueToUpdate : valuesToBeUpdate) {
+			if (!valueToUpdate.containsKey(Constants.TO_VALUE)) {
+				continue;
+			}
+			Map<String, Object> toValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
+			Optional<String> firstKey = toValue.keySet().stream().findFirst();
+			if (!firstKey.isPresent()) {
+				continue;
+			}
+			String keyToUpdate = firstKey.get();
+			if (Constants.FIRSTNAME.equalsIgnoreCase(keyToUpdate)) {
+				requestWrapper.put(Constants.FIRST_NAME_CAMEL_CASE, toValue.get(keyToUpdate));
+			}
+			if (Constants.MOBILE.equalsIgnoreCase(keyToUpdate)) {
+				requestWrapper.put(Constants.PHONE, String.valueOf(toValue.get(keyToUpdate)));
+			}
+		}
+	}
+
+	private void applyMinistryOrStateDetails(WfRequest wfRequest, Map<String, Object> updateRequest) {
+		Map<String, Object> orgDetails = fetchOrgDetails(wfRequest.getDeptName());
+		if (!MapUtils.isNotEmpty(orgDetails)) {
+			logger.warn("Organisation details not found for deptName: {}",wfRequest.getDeptName());
+			return;
+		}
+		Object organisationTypeObj = orgDetails.get(Constants.ORGANISATION_TYPE);
+		if (!org.apache.commons.lang3.ObjectUtils.isNotEmpty(organisationTypeObj)) {
+			return;
+		}
+		String organisationType = organisationTypeObj.toString();
+		if (stateOrMinistry.contains(organisationType)) {
+			updateRequest.put(Constants.MINISTRYORSTATEID, String.valueOf(orgDetails.get(Constants.ROOT_ORG_ID)));
+			updateRequest.put(Constants.MINISTRYORSTATEORGNAME, String.valueOf(orgDetails.get(Constants.ORG_NAME)));
+		} else if (Constants.SPV_ORGTYPEVALUE.equalsIgnoreCase(organisationType)) {
+			logger.warn("Organisation type is SPV, hence not updating ministry or state details");
+		} else {
+			updateRequest.put(Constants.MINISTRYORSTATEID, String.valueOf(orgDetails.get(Constants.MINISTRYORSTATEID)));
+			updateRequest.put(Constants.MINISTRYORSTATEORGNAME, String.valueOf(orgDetails.get(Constants.MINISTRYORSTATENAME)));
+		}
 	}
 
 	private HashMap<String, String> getHeaders() {
@@ -484,6 +519,23 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 
 	public List<String> getMdoAdminAndPCDetails(String rootOrgId, List<String> roles) {
 		List<String> mdoResults = new ArrayList<>();
+		Map<String, Object> requestObject = buildMdoAdminSearchRequest(rootOrgId, roles);
+		try {
+			StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
+			builder.append(configuration.getLmsUserSearchEndPoint());
+			Map<String, Object> mdoAdminSearchResult = (Map<String, Object>) requestServiceImpl
+					.fetchResultUsingPost(builder, requestObject, Map.class, getHeaders());
+			for (Map<String, Object> content : extractUserSearchContents(mdoAdminSearchResult)) {
+				addPrimaryEmailIfPresent(content, mdoResults);
+			}
+		} catch (Exception e) {
+			logger.error("Exception while fetching user setails : ",e);
+			throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
+		}
+		return mdoResults;
+	}
+
+	private Map<String, Object> buildMdoAdminSearchRequest(String rootOrgId, List<String> roles) {
 		Map<String, Object> requestObject = new HashMap<>();
 		Map<String, Object> request = new HashMap<>();
 		Map<String, Object> filters = new HashMap<>();
@@ -494,37 +546,19 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 		request.put("filters", filters);
 		request.put(Constants.FIELDS, configuration.getMdoAdminSearchFields());
 		requestObject.put("request", request);
-		HashMap<String, String> headersValue = new HashMap<>();
-		headersValue.put("Content-Type", "application/json");
-		try {
-			StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
-			builder.append(configuration.getLmsUserSearchEndPoint());
-			Map<String, Object> mdoAdminSearchResult = (Map<String, Object>) requestServiceImpl
-					.fetchResultUsingPost(builder, requestObject, Map.class, getHeaders());
-			if (mdoAdminSearchResult != null
-					&& "OK".equalsIgnoreCase((String) mdoAdminSearchResult.get(Constants.RESPONSE_CODE))) {
-				Map<String, Object> map = (Map<String, Object>) mdoAdminSearchResult.get(Constants.RESULT);
-				Map<String, Object> response = (Map<String, Object>) map.get(Constants.RESPONSE);
-				List<Map<String, Object>> contents = (List<Map<String, Object>>) response.get(Constants.CONTENT);
-				if (!CollectionUtils.isEmpty(contents)) {
-					for (Map<String, Object> content : contents) {
-						HashMap<String, Object> profileDetails = (HashMap<String, Object>) content
-								.get(Constants.PROFILE_DETAILS);
-						if (MapUtils.isNotEmpty(profileDetails)) {
-							HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
-									.get(Constants.PERSONAL_DETAILS);
-							if (MapUtils.isNotEmpty(personalDetails)) {
-								mdoResults.add((String) personalDetails.get(Constants.PRIMARY_EMAIL));
-							}
-						}
-					}
-				}
-			}
-		} catch (Exception e) {
-			logger.error("Exception while fetching user setails : ",e);
-			throw new ApplicationException("Hub Service ERROR: " + e.getMessage(), e);
+		return requestObject;
+	}
+
+	private void addPrimaryEmailIfPresent(Map<String, Object> content, List<String> mdoResults) {
+		HashMap<String, Object> profileDetails = (HashMap<String, Object>) content.get(Constants.PROFILE_DETAILS);
+		if (!MapUtils.isNotEmpty(profileDetails)) {
+			return;
 		}
-		return mdoResults;
+		HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
+				.get(Constants.PERSONAL_DETAILS);
+		if (MapUtils.isNotEmpty(personalDetails)) {
+			mdoResults.add((String) personalDetails.get(Constants.PRIMARY_EMAIL));
+		}
 	}
 
 	public boolean validateJsonAgainstSchema(Map<String, Object> existingProfileDetails) {
@@ -683,34 +717,45 @@ public class UserProfileWfServiceImpl implements UserProfileWfService {
 
     private Map<String, Object> fetchOrgDetails(String deptName) {
         logger.debug("Fetching Org details for deptName: {}", deptName);
-        if (StringUtils.isNotEmpty(deptName)) {
-            Map<String, Object> reqMap = new HashMap<>();
-            reqMap.put(Constants.FILTERS, Collections.singletonMap(Constants.CHANNEL, deptName));
-            Map<String, Object> requestObj = new HashMap<>();
-            requestObj.put(Constants.REQUEST, reqMap);
-            HashMap<String, String> headersValue = new HashMap<>();
-            headersValue.put(Constants.CONTENT_TYPE, Constants.APPLICATION_JSON);
-            try {
-                StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
-                builder.append(configuration.getLmsOrgSearchEndPoint());
-                Map<String, Object> orgDetails = (Map<String, Object>) requestServiceImpl
-                        .fetchResultUsingPost(builder, requestObj, Map.class, headersValue);
-                if (MapUtils.isNotEmpty(orgDetails) && Constants.OK.equalsIgnoreCase((String)orgDetails.get(Constants.RESPONSE_CODE))) {
-                    Map<String, Object> result = (Map<String, Object>) orgDetails.get(Constants.RESULT);
-                    if (MapUtils.isNotEmpty(result) && result.get(Constants.RESPONSE) instanceof Map) {
-                        Map<String, Object> response = (Map<String, Object>) result.get(Constants.RESPONSE);
-                        if (MapUtils.isNotEmpty(response) && response.get(Constants.CONTENT) instanceof List) {
-                            List<Map<String, Object>> contentList = (List<Map<String, Object>>) response.get(Constants.CONTENT);
-                            if (CollectionUtils.isNotEmpty(contentList)) {
-                                return contentList.get(0);
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("There is a error occured while searching for the Org details : {}",e.getMessage());
-            }
+        if (StringUtils.isEmpty(deptName)) {
+            return Map.of();
+        }
+        Map<String, Object> requestObj = buildOrgDetailsRequest(deptName);
+        HashMap<String, String> headersValue = new HashMap<>();
+        headersValue.put(Constants.CONTENT_TYPE, Constants.APPLICATION_JSON);
+        try {
+            StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
+            builder.append(configuration.getLmsOrgSearchEndPoint());
+            Map<String, Object> orgDetails = (Map<String, Object>) requestServiceImpl
+                    .fetchResultUsingPost(builder, requestObj, Map.class, headersValue);
+            return extractFirstOrgContent(orgDetails);
+        } catch (Exception e) {
+            logger.error("There is a error occured while searching for the Org details : {}",e.getMessage());
         }
         return Map.of();
+    }
+
+    private Map<String, Object> buildOrgDetailsRequest(String deptName) {
+        Map<String, Object> reqMap = new HashMap<>();
+        reqMap.put(Constants.FILTERS, Collections.singletonMap(Constants.CHANNEL, deptName));
+        Map<String, Object> requestObj = new HashMap<>();
+        requestObj.put(Constants.REQUEST, reqMap);
+        return requestObj;
+    }
+
+    private Map<String, Object> extractFirstOrgContent(Map<String, Object> orgDetails) {
+        if (!MapUtils.isNotEmpty(orgDetails) || !Constants.OK.equalsIgnoreCase((String) orgDetails.get(Constants.RESPONSE_CODE))) {
+            return Map.of();
+        }
+        Map<String, Object> result = (Map<String, Object>) orgDetails.get(Constants.RESULT);
+        if (!MapUtils.isNotEmpty(result) || !(result.get(Constants.RESPONSE) instanceof Map)) {
+            return Map.of();
+        }
+        Map<String, Object> response = (Map<String, Object>) result.get(Constants.RESPONSE);
+        if (!MapUtils.isNotEmpty(response) || !(response.get(Constants.CONTENT) instanceof List)) {
+            return Map.of();
+        }
+        List<Map<String, Object>> contentList = (List<Map<String, Object>>) response.get(Constants.CONTENT);
+        return CollectionUtils.isNotEmpty(contentList) ? contentList.get(0) : Map.of();
     }
 }

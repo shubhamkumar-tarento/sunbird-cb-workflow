@@ -117,12 +117,7 @@ public class WorkflowApplicationConsumer {
                     configuration.getLmsServiceHost())
                     .append(configuration.getLmsUserSearchEndPoint());
 
-            Map<String, Object> filters = new HashMap<>();
-            filters.put(Constants.USER_ID, userId);
-            Map<String, Object> request = new HashMap<>();
-            request.put(Constants.FILTERS, filters);
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put(Constants.REQUEST, request);
+            Map<String, Object> requestBody = buildUserRolesRequest(userId);
 
             Map<String, Object> response = (Map<String, Object>) requestServiceImpl.fetchResultUsingPost(url, requestBody, Map.class, null);
 
@@ -137,20 +132,9 @@ public class WorkflowApplicationConsumer {
                 List<Map<String, Object>> content = (List<Map<String, Object>>) responseMap
                         .get(Constants.CONTENT);
 
-                if (!CollectionUtils.isEmpty(content)) {
-                    List<Map<String, Object>> organisations = (List<Map<String, Object>>) content
-                            .get(0).get(Constants.ORGANISATIONS);
-
-                    if (!CollectionUtils.isEmpty(organisations)) {
-                        for (Map<String, Object> org : organisations) {
-                            if (rootOrgId.equalsIgnoreCase(
-                                    (String) org.get(Constants.ORGANIZATION_ID))) {
-                                List<String> roles = (List<String>) org.get(Constants.ROLES);
-                                return roles != null ? new ArrayList<>(roles)
-                                        : new ArrayList<>();
-                            }
-                        }
-                    }
+                List<String> roles = findRolesForOrg(content, rootOrgId);
+                if (roles != null) {
+                    return roles;
                 }
             }
         } catch (Exception e) {
@@ -158,5 +142,36 @@ public class WorkflowApplicationConsumer {
                     userId, e.getMessage(), e);
         }
         return new ArrayList<>();
+    }
+
+    private Map<String, Object> buildUserRolesRequest(String userId) {
+        Map<String, Object> filters = new HashMap<>();
+        filters.put(Constants.USER_ID, userId);
+        Map<String, Object> request = new HashMap<>();
+        request.put(Constants.FILTERS, filters);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, request);
+        return requestBody;
+    }
+
+    private List<String> findRolesForOrg(List<Map<String, Object>> content, String rootOrgId) {
+        if (CollectionUtils.isEmpty(content)) {
+            return null;
+        }
+        List<Map<String, Object>> organisations = (List<Map<String, Object>>) content
+                .get(0).get(Constants.ORGANISATIONS);
+
+        if (CollectionUtils.isEmpty(organisations)) {
+            return null;
+        }
+        for (Map<String, Object> org : organisations) {
+            if (rootOrgId.equalsIgnoreCase(
+                    (String) org.get(Constants.ORGANIZATION_ID))) {
+                List<String> roles = (List<String>) org.get(Constants.ROLES);
+                return roles != null ? new ArrayList<>(roles)
+                        : new ArrayList<>();
+            }
+        }
+        return null;
     }
 }

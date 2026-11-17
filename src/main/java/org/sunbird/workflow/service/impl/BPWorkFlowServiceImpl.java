@@ -182,46 +182,63 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         int totalApprovedUserCount = getTotalApprovedUserCount(wfRequest);
         boolean enrolAccess = validateBatchEnrolment(courseBatchDetails, totalApprovedUserCount, 0,
                 Constants.BP_UPDATE_STATE);
-        if (enrolAccess) {
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put(Constants.USER_ID, wfRequest.getUserId());
-            requestBody.put(Constants.BATCH_ID, wfRequest.getApplicationId());
-            requestBody.put(Constants.COURSE_ID, wfRequest.getCourseId());
-            Map<String, Object> request = new HashMap<>();
-            request.put(Constants.REQUEST, requestBody);
-            HashMap<String, String> headersValue = new HashMap<>();
-            headersValue.put("Content-Type", "application/json");
-            try {
-                StringBuilder builder = new StringBuilder(configuration.getCourseServiceHost());
-                if (wfRequest.getState().equalsIgnoreCase(Constants.SEND_FOR_PC_APPROVAL) && wfRequest.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
-                    builder.append(configuration.getAdminBlendedProgramEnrolEndPoint());
-                    requestBody.put(Constants.ENROLLED_DATE.toLowerCase(), wfRequest.getCreatedOn());
-                } else {
-                    builder.append(configuration.getAdminEnrolEndPoint());
-                }
-                Map<String, Object> enrolResp = (Map<String, Object>) requestServiceImpl
-                        .fetchResultUsingPost(builder, request, Map.class, headersValue);
-                if (enrolResp != null
-                        && "OK".equalsIgnoreCase((String) enrolResp.get(Constants.RESPONSE_CODE))) {
-                    logger.info("User enrolment success");
-                } else {
-                    if (enrolResp != null) {
-                        logger.error("user enrolment failed: {}",
-                                ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
-                    } else {
-                        logger.error("user enrolment failed: no response from course service");
-                    }
-                    if (wfRequest.getState().equalsIgnoreCase(Constants.SEND_FOR_PC_APPROVAL) && wfRequest.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
-                        reverseApprovedRequest(wfRequest);
-                    }
-                }
-
-            } catch (Exception e) {
-                logger.error("Exception while enrol user");
-                if (wfRequest.getState().equalsIgnoreCase(Constants.SEND_FOR_PC_APPROVAL) && wfRequest.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME)) {
-                    reverseApprovedRequest(wfRequest);
-                }
+        if (!enrolAccess) {
+            return;
+        }
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.USER_ID, wfRequest.getUserId());
+        requestBody.put(Constants.BATCH_ID, wfRequest.getApplicationId());
+        requestBody.put(Constants.COURSE_ID, wfRequest.getCourseId());
+        Map<String, Object> request = new HashMap<>();
+        request.put(Constants.REQUEST, requestBody);
+        HashMap<String, String> headersValue = new HashMap<>();
+        headersValue.put("Content-Type", "application/json");
+        try {
+            StringBuilder builder = new StringBuilder(configuration.getCourseServiceHost());
+            appendEnrolEndpoint(builder, requestBody, wfRequest);
+            Map<String, Object> enrolResp = (Map<String, Object>) requestServiceImpl
+                    .fetchResultUsingPost(builder, request, Map.class, headersValue);
+            if (enrolResp != null
+                    && "OK".equalsIgnoreCase((String) enrolResp.get(Constants.RESPONSE_CODE))) {
+                logger.info("User enrolment success");
+            } else {
+                logEnrolFailure(enrolResp);
+                reverseIfPcApprovalForBlendedProgram(wfRequest);
             }
+
+        } catch (Exception e) {
+            logger.error("Exception while enrol user");
+            reverseIfPcApprovalForBlendedProgram(wfRequest);
+        }
+    }
+
+    private boolean isPcApprovalForBlendedProgram(WfRequest wfRequest) {
+        return wfRequest.getState().equalsIgnoreCase(Constants.SEND_FOR_PC_APPROVAL)
+                && wfRequest.getServiceName().equalsIgnoreCase(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+    }
+
+    private void appendEnrolEndpoint(StringBuilder builder, Map<String, Object> requestBody, WfRequest wfRequest) {
+        if (isPcApprovalForBlendedProgram(wfRequest)) {
+            builder.append(configuration.getAdminBlendedProgramEnrolEndPoint());
+            requestBody.put(Constants.ENROLLED_DATE.toLowerCase(), wfRequest.getCreatedOn());
+        } else {
+            builder.append(configuration.getAdminEnrolEndPoint());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void logEnrolFailure(Map<String, Object> enrolResp) {
+        if (enrolResp != null) {
+            logger.error("user enrolment failed: {}",
+                    ((Map<String, Object>) enrolResp.get(Constants.PARAMS)).get(Constants.ERROR_MESSAGE));
+        } else {
+            logger.error("user enrolment failed: no response from course service");
+        }
+    }
+
+    private void reverseIfPcApprovalForBlendedProgram(WfRequest wfRequest) {
+        if (isPcApprovalForBlendedProgram(wfRequest)) {
+            reverseApprovedRequest(wfRequest);
         }
     }
 
@@ -234,41 +251,47 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 Constants.TABLE_COURSE_BATCH,
                 propertyMap,
                 Arrays.asList(Constants.BATCH_ATTRIBUTES, Constants.ENROLMENT_END_DATE, Constants.START_DATE, Constants.NAME));
-        if (CollectionUtils.isNotEmpty(batchAttributesDetails)) {
-            Map<String, Object> courseBatch = batchAttributesDetails.get(0);
-            if (courseBatch.containsKey(Constants.BATCH_ATTRIBUTES)) {
-                try {
-                    Map<String, Object> batchAttributes = (new ObjectMapper()).readValue(
-                            (String) courseBatch.get(Constants.BATCH_ATTRIBUTES),
-                            new TypeReference<HashMap<String, Object>>() {
-                            });
+        if (CollectionUtils.isEmpty(batchAttributesDetails)) {
+            return Collections.emptyMap();
+        }
+        Map<String, Object> courseBatch = batchAttributesDetails.get(0);
+        if (!courseBatch.containsKey(Constants.BATCH_ATTRIBUTES)) {
+            return Collections.emptyMap();
+        }
+        return buildBatchAttributesResult(courseBatch, courseId, batchId);
+    }
 
-                    String currentBatchSizeString = batchAttributes != null
-                            && batchAttributes.containsKey(Constants.CURRENT_BATCH_SIZE)
-                                    ? (String) batchAttributes.get(Constants.CURRENT_BATCH_SIZE)
-                                    : "0";
-                    int currentBatchSize = Integer.parseInt(currentBatchSizeString);
-                    Date enrollmentEndDate = courseBatch.containsKey(Constants.ENROLMENT_END_DATE)
-                            ? Date.from((Instant) courseBatch.get(Constants.ENROLMENT_END_DATE))
-                            : null;
-                    Date batchStartDate = courseBatch.containsKey(Constants.START_DATE)
-                            ? Date.from((Instant) courseBatch.get(Constants.START_DATE))
-                            : null;
-                    String batchName = batchAttributes != null
-                            && courseBatch.containsKey(Constants.NAME)
-                            ? (String) courseBatch.get(Constants.NAME)
-                            : "";
-                    Map<String, Object> result = new HashMap<>();
-                    result.put(Constants.CURRENT_BATCH_SIZE, currentBatchSize);
-                    result.put(Constants.ENROLMENT_END_DATE, enrollmentEndDate);
-                    result.put(Constants.START_DATE, batchStartDate);
-                    result.put(Constants.BATCH_NAME, batchName);
-                    return result;
-                } catch (Exception e) {
-                    logger.error("Failed to retrieve course batch details. CourseId: {}, BatchId: {}",
-                            courseId, batchId, e);
-                }
-            }
+    private Map<String, Object> buildBatchAttributesResult(Map<String, Object> courseBatch, String courseId, String batchId) {
+        try {
+            Map<String, Object> batchAttributes = (new ObjectMapper()).readValue(
+                    (String) courseBatch.get(Constants.BATCH_ATTRIBUTES),
+                    new TypeReference<HashMap<String, Object>>() {
+                    });
+
+            String currentBatchSizeString = batchAttributes != null
+                    && batchAttributes.containsKey(Constants.CURRENT_BATCH_SIZE)
+                            ? (String) batchAttributes.get(Constants.CURRENT_BATCH_SIZE)
+                            : "0";
+            int currentBatchSize = Integer.parseInt(currentBatchSizeString);
+            Date enrollmentEndDate = courseBatch.containsKey(Constants.ENROLMENT_END_DATE)
+                    ? Date.from((Instant) courseBatch.get(Constants.ENROLMENT_END_DATE))
+                    : null;
+            Date batchStartDate = courseBatch.containsKey(Constants.START_DATE)
+                    ? Date.from((Instant) courseBatch.get(Constants.START_DATE))
+                    : null;
+            String batchName = batchAttributes != null
+                    && courseBatch.containsKey(Constants.NAME)
+                    ? (String) courseBatch.get(Constants.NAME)
+                    : "";
+            Map<String, Object> result = new HashMap<>();
+            result.put(Constants.CURRENT_BATCH_SIZE, currentBatchSize);
+            result.put(Constants.ENROLMENT_END_DATE, enrollmentEndDate);
+            result.put(Constants.START_DATE, batchStartDate);
+            result.put(Constants.BATCH_NAME, batchName);
+            return result;
+        } catch (Exception e) {
+            logger.error("Failed to retrieve course batch details. CourseId: {}, BatchId: {}",
+                    courseId, batchId, e);
         }
         return Collections.emptyMap();
     }
@@ -349,8 +372,8 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
                 handleApprovalRequest(wfRequest);
                 break;
             default:
-                logger.info("Status is Skipped by Blended Program Workflow Handler - Current Status: "
-                        + wfStatusEntity.getCurrentStatus());
+                logger.info("Status is Skipped by Blended Program Workflow Handler - Current Status: {}",
+                        wfStatusEntity.getCurrentStatus());
                 break;
         }
     }
@@ -1862,20 +1885,9 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
     private String extractUserRole(Map<String, Object> profile) {
         try {
             List<Map<String, Object>> orgs = (List<Map<String, Object>>) profile.get(Constants.ORGANISATIONS);
-            if (orgs != null) {
-                for (Map<String, Object> org : orgs) {
-                    List<String> roles = (List<String>) org.get(Constants.ROLES);
-                    if (roles != null) {
-
-                        if (roles.contains(Constants.PROGRAM_COORDINATOR)) {
-                            return Constants.PC;
-                        }
-
-                        if (roles.contains(Constants.MDO_ADMIN) || roles.contains(Constants.MDO_LEADER)) {
-                            return Constants.MDO;
-                        }
-                    }
-                }
+            String role = findRoleFromOrganisations(orgs);
+            if (role != null) {
+                return role;
             }
         } catch (Exception e) {
             // Profile data shape is unreliable across sources; fall back to SELF role on any parsing issue.
@@ -1883,6 +1895,34 @@ public class BPWorkFlowServiceImpl implements BPWorkFlowService {
         }
 
         return Constants.SELF;
+    }
+
+    private String findRoleFromOrganisations(List<Map<String, Object>> orgs) {
+        if (orgs == null) {
+            return null;
+        }
+        for (Map<String, Object> org : orgs) {
+            String role = findRoleFromOrg(org);
+            if (role != null) {
+                return role;
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private String findRoleFromOrg(Map<String, Object> org) {
+        List<String> roles = (List<String>) org.get(Constants.ROLES);
+        if (roles == null) {
+            return null;
+        }
+        if (roles.contains(Constants.PROGRAM_COORDINATOR)) {
+            return Constants.PC;
+        }
+        if (roles.contains(Constants.MDO_ADMIN) || roles.contains(Constants.MDO_LEADER)) {
+            return Constants.MDO;
+        }
+        return null;
     }
 
     private boolean shouldOverride(String existingRole, String incomingRole) {

@@ -55,33 +55,44 @@ public class ApplicationProcessingServiceImplV2 {
     }
 
     public void updateDepartmentToPortalDBs(List<WfRequest> wfRequests) {
-        wfRequests.forEach(wfRequest -> {
-            WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(), wfRequest.getWfId());
-            if (Constants.PROFILE_SERVICE_NAME.equals(wfRequest.getServiceName())
-                    && Constants.APPROVED_STATE.equals(wfStatusEntity.getCurrentStatus())) {
-                for (HashMap<String, Object> updatedValues : wfRequest.getUpdateFieldValues()) {
-                    if (ObjectUtils.isEmpty(updatedValues.get("fieldKey")))
-                        continue;
-                    if ("professionalDetails".equals(updatedValues.get("fieldKey"))) {
-                        HashMap<String, Object> fromValue = (HashMap<String, Object>) updatedValues.get("fromValue");
-                        HashMap<String, Object> toValue = (HashMap<String, Object>) updatedValues.get("toValue");
-                        String key = toValue.entrySet().iterator().next().getKey();
-                        if (StringUtils.hasLength(key) && key.equals("name")) {
-                            String newDeptName = (String) toValue.entrySet().iterator().next().getValue();
-                            String oldDeptName = (String) fromValue.entrySet().iterator().next().getValue();
-                            HashMap<String, Object> departMentInfo = new HashMap<>();
-                            departMentInfo.put("userId", wfRequest.getApplicationId());
-                            departMentInfo.put("oldDeptName", oldDeptName);
-                            departMentInfo.put("newDeptName", newDeptName);
-                            departMentInfo.put("isActive", true);
-                            departMentInfo.put("isBlocked", false);
-                            updateUserDepartment(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
-                                    wfRequest.getApplicationId(), departMentInfo);
-                        }
-                    }
-                }
-            }
-        });
+        wfRequests.forEach(this::processDepartmentUpdateForRequest);
+    }
+
+    private void processDepartmentUpdateForRequest(WfRequest wfRequest) {
+        WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(), wfRequest.getWfId());
+        if (!Constants.PROFILE_SERVICE_NAME.equals(wfRequest.getServiceName())
+                || !Constants.APPROVED_STATE.equals(wfStatusEntity.getCurrentStatus())) {
+            return;
+        }
+        for (HashMap<String, Object> updatedValues : wfRequest.getUpdateFieldValues()) {
+            applyDepartmentUpdateIfProfessionalDetails(wfRequest, wfStatusEntity, updatedValues);
+        }
+    }
+
+    private void applyDepartmentUpdateIfProfessionalDetails(WfRequest wfRequest, WfStatusEntity wfStatusEntity,
+                                                              HashMap<String, Object> updatedValues) {
+        if (ObjectUtils.isEmpty(updatedValues.get("fieldKey"))) {
+            return;
+        }
+        if (!"professionalDetails".equals(updatedValues.get("fieldKey"))) {
+            return;
+        }
+        HashMap<String, Object> fromValue = (HashMap<String, Object>) updatedValues.get("fromValue");
+        HashMap<String, Object> toValue = (HashMap<String, Object>) updatedValues.get("toValue");
+        String key = toValue.entrySet().iterator().next().getKey();
+        if (!StringUtils.hasLength(key) || !key.equals("name")) {
+            return;
+        }
+        String newDeptName = (String) toValue.entrySet().iterator().next().getValue();
+        String oldDeptName = (String) fromValue.entrySet().iterator().next().getValue();
+        HashMap<String, Object> departMentInfo = new HashMap<>();
+        departMentInfo.put("userId", wfRequest.getApplicationId());
+        departMentInfo.put("oldDeptName", oldDeptName);
+        departMentInfo.put("newDeptName", newDeptName);
+        departMentInfo.put("isActive", true);
+        departMentInfo.put("isBlocked", false);
+        updateUserDepartment(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
+                wfRequest.getApplicationId(), departMentInfo);
     }
 
     public void updateUserDepartment(String rootOrg, String org, String wid, Map<String, Object> departmentInfo) {

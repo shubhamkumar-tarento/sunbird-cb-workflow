@@ -103,7 +103,9 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 * @return
 	 */
 
-	public Response workflowTransition(String rootOrg, String org, WfRequest wfRequest, String userId, String role) {
+	private record RequestKeyResolution(String requestKey, String doptName) {}
+
+	private RequestKeyResolution resolveRequestKeyAndDeptName(WfRequest wfRequest) {
 		String requestKey = null;
 		String doptName = null;
 		for (Map<String, Object> fieldChange : wfRequest.getUpdateFieldValues()) {
@@ -116,12 +118,16 @@ public class WorkflowServiceImpl implements Workflowservice {
 				requestKey = toValue.containsKey(Constants.GROUP) ? Constants.GROUP : Constants.DESIGNATION;
 			}
 		}
-		HashMap<String, String> changeStatusResponse;
+		return new RequestKeyResolution(requestKey, doptName);
+	}
+
+	private record StatusChangeOutcome(List<String> wfIds, String changedStatus, boolean aborted) {}
+
+	private StatusChangeOutcome performStatusChangeForFields(String rootOrg, String org, WfRequest wfRequest,
+			String userId, String role, Response response, HashMap<String, Object> data) {
 		List<String> wfIds = new ArrayList<>();
 		String changedStatus = null;
-		Response response = new Response();
-		HashMap<String, Object> data = new HashMap<>();
-
+		HashMap<String, String> changeStatusResponse;
 		if (configuration.getMultipleWfCreationEnable() && !CollectionUtils.isEmpty(wfRequest.getUpdateFieldValues())) {
 			String wfId = wfRequest.getWfId();
 			for (HashMap<String, Object> updatedField : wfRequest.getUpdateFieldValues()) {
@@ -130,7 +136,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 				if (StringUtils.hasLength(wfRequest.getServiceName())
 						&& !StringUtils.hasLength(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)
 						&& handleProfileServiceWorkflow(wfRequest, response, data)) {
-					return response;
+					return new StatusChangeOutcome(wfIds, changedStatus, true);
 				}
 				changeStatusResponse = changeStatus(rootOrg, org, wfRequest, userId, role);
 				wfIds.add(changeStatusResponse.get(Constants.WF_ID_CONSTANT));
@@ -140,19 +146,31 @@ public class WorkflowServiceImpl implements Workflowservice {
 			if (StringUtils.hasLength(wfRequest.getServiceName())
 					&& !StringUtils.hasLength(wfRequest.getWfId()) && wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME)
 					&& handleProfileServiceWorkflow(wfRequest, response, data)) {
-				return response;
+				return new StatusChangeOutcome(wfIds, changedStatus, true);
 			}
 			changeStatusResponse = changeStatus(rootOrg, org, wfRequest, userId, role);
 			wfIds.add(changeStatusResponse.get(Constants.WF_ID_CONSTANT));
 			changedStatus = changeStatusResponse.get(Constants.STATUS);
 		}
+		return new StatusChangeOutcome(wfIds, changedStatus, false);
+	}
+
+	public Response workflowTransition(String rootOrg, String org, WfRequest wfRequest, String userId, String role) {
+		RequestKeyResolution requestKeyResolution = resolveRequestKeyAndDeptName(wfRequest);
+		Response response = new Response();
+		HashMap<String, Object> data = new HashMap<>();
+
+		StatusChangeOutcome outcome = performStatusChangeForFields(rootOrg, org, wfRequest, userId, role, response, data);
+		if (outcome.aborted()) {
+			return response;
+		}
 
 		if (wfRequest.getServiceName().equalsIgnoreCase(Constants.PROFILE_SERVICE_NAME) && !wfRequest.getAction().equalsIgnoreCase(Constants.WITHDRAW)) {
-			sendNotification(requestKey, doptName, wfRequest);
+			sendNotification(requestKeyResolution.requestKey(), requestKeyResolution.doptName(), wfRequest);
 		}
-		data.put(Constants.STATUS, changedStatus);
-		data.put(Constants.WF_IDS_CONSTANT, wfIds);
-		response.put(Constants.MESSAGE, Constants.STATUS_CHANGE_MESSAGE + changedStatus);
+		data.put(Constants.STATUS, outcome.changedStatus());
+		data.put(Constants.WF_IDS_CONSTANT, outcome.wfIds());
+		response.put(Constants.MESSAGE, Constants.STATUS_CHANGE_MESSAGE + outcome.changedStatus());
 		response.put(Constants.DATA, data);
 		response.put(Constants.STATUS, HttpStatus.OK);
 		return response;
@@ -1203,21 +1221,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 			for (Map<String, Object> userData : userDataList) {
 				List<WfStatusEntity> wfInfoList = (List<WfStatusEntity>) userData.get(Constants.WF_INFO);
 				for (WfStatusEntity wfStatusEntity : wfInfoList) {
-					List<Map<String, Object>> valuesList;
-					valuesList = mapper.readValue(wfStatusEntity.getUpdateFieldValues(), typeRef);
-					for (Map<String, Object> value : valuesList) {
-						if (!value.containsKey(Constants.TO_VALUE))
-							continue;
-						Map<String, Object> toValue = (Map<String, Object>) value.get(Constants.TO_VALUE);
-						Optional<Map.Entry<String, Object>> fieldKeyOpt = toValue.entrySet().stream().findFirst();
-						String updateFieldKey = null;
-						if (fieldKeyOpt.isPresent()) {
-							updateFieldKey = fieldKeyOpt.get().getKey();
-						}
-						if (Constants.NAME.equalsIgnoreCase(updateFieldKey)) {
-							wfStatusEntity.setOrgTansferRequest(true);
-						}
-					}
+					markOrgTransferIfNameChanged(wfStatusEntity, typeRef);
 				}
 			}
 		} catch (Exception e) {
@@ -1226,6 +1230,24 @@ public class WorkflowServiceImpl implements Workflowservice {
 			response.put(Constants.COUNT, 0);
 			response.put(Constants.MESSAGE, "Exception occurred while fetching requested fields for approval");
 			response.put(Constants.STATUS, Constants.FAILED);
+		}
+	}
+
+	private void markOrgTransferIfNameChanged(WfStatusEntity wfStatusEntity,
+			TypeReference<List<Map<String, Object>>> typeRef) throws IOException {
+		List<Map<String, Object>> valuesList = mapper.readValue(wfStatusEntity.getUpdateFieldValues(), typeRef);
+		for (Map<String, Object> value : valuesList) {
+			if (!value.containsKey(Constants.TO_VALUE))
+				continue;
+			Map<String, Object> toValue = (Map<String, Object>) value.get(Constants.TO_VALUE);
+			Optional<Map.Entry<String, Object>> fieldKeyOpt = toValue.entrySet().stream().findFirst();
+			String updateFieldKey = null;
+			if (fieldKeyOpt.isPresent()) {
+				updateFieldKey = fieldKeyOpt.get().getKey();
+			}
+			if (Constants.NAME.equalsIgnoreCase(updateFieldKey)) {
+				wfStatusEntity.setOrgTansferRequest(true);
+			}
 		}
 	}
 
@@ -1251,34 +1273,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 				return this.getNoPendingRequestAvailableResponse(Constants. NO_PENDING_REQUEST_AVAILABLE_MESSAGE);
 			}
 			userIdSet.clear();
-			for (WfStatusEntity wfStatusEntity : pendingRequestsEntityList) {
-				ObjectMapper objectMapper = new ObjectMapper();
-				List<Map<String, Object>> valuesToBeUpdate = objectMapper.readValue(wfStatusEntity.getUpdateFieldValues(), new TypeReference<List<Map<String, Object>>>() {
-				});
-				List<Map<String, Object>> pendingRequestList;
-				for(Map<String, Object> valueToUpdate : valuesToBeUpdate){
-					if(valueToUpdate.containsKey(Constants.TO_VALUE)){
-						Map<String, Object> updateKeyValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
-						Optional<String> firstKey = updateKeyValue.keySet().stream().findFirst();
-						if (!firstKey.isPresent()) {
-							continue;
-						}
-						String keyToUpdate = firstKey.get();
-						if(Constants.DESIGNATION.equalsIgnoreCase(keyToUpdate) || Constants.GROUP.equalsIgnoreCase(keyToUpdate)){
-							userIdSet.add(wfStatusEntity.getUserId());
-							if(allPendingRequest.containsKey(wfStatusEntity.getUserId())) {
-								pendingRequestList = (List<Map<String, Object>>) allPendingRequest.get(wfStatusEntity.getUserId());
-								pendingRequestList.add(updateKeyValue);
-								allPendingRequest.put(wfStatusEntity.getUserId(), pendingRequestList);
-							} else {
-								pendingRequestList = new ArrayList<>();
-								pendingRequestList.add(updateKeyValue);
-								allPendingRequest.put(wfStatusEntity.getUserId(), pendingRequestList);
-							}
-						}
-					}
-				}
-			}
+			collectPendingDesignationOrGroupRequests(pendingRequestsEntityList, allPendingRequest, userIdSet);
 			String csvFilePath = "/tmp/pendingRequest.csv";
 			Map<String, Object> allUserDetails;
 			if (CollectionUtils.isEmpty(userIdSet)) {
@@ -1297,6 +1292,43 @@ public class WorkflowServiceImpl implements Workflowservice {
 			responseEntity =  ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<Object>build();
 		}
 		return responseEntity;
+	}
+
+	private void collectPendingDesignationOrGroupRequests(List<WfStatusEntity> pendingRequestsEntityList,
+			Map<String, Object> allPendingRequest, Set<String> userIdSet) throws IOException {
+		ObjectMapper objectMapper = new ObjectMapper();
+		for (WfStatusEntity wfStatusEntity : pendingRequestsEntityList) {
+			List<Map<String, Object>> valuesToBeUpdate = objectMapper.readValue(wfStatusEntity.getUpdateFieldValues(), new TypeReference<List<Map<String, Object>>>() {
+			});
+			for (Map<String, Object> valueToUpdate : valuesToBeUpdate) {
+				addPendingRequestIfApplicable(wfStatusEntity, valueToUpdate, allPendingRequest, userIdSet);
+			}
+		}
+	}
+
+	private void addPendingRequestIfApplicable(WfStatusEntity wfStatusEntity, Map<String, Object> valueToUpdate,
+			Map<String, Object> allPendingRequest, Set<String> userIdSet) {
+		if (!valueToUpdate.containsKey(Constants.TO_VALUE)) {
+			return;
+		}
+		Map<String, Object> updateKeyValue = (Map<String, Object>) valueToUpdate.get(Constants.TO_VALUE);
+		Optional<String> firstKey = updateKeyValue.keySet().stream().findFirst();
+		if (!firstKey.isPresent()) {
+			return;
+		}
+		String keyToUpdate = firstKey.get();
+		if (!(Constants.DESIGNATION.equalsIgnoreCase(keyToUpdate) || Constants.GROUP.equalsIgnoreCase(keyToUpdate))) {
+			return;
+		}
+		userIdSet.add(wfStatusEntity.getUserId());
+		List<Map<String, Object>> pendingRequestList;
+		if (allPendingRequest.containsKey(wfStatusEntity.getUserId())) {
+			pendingRequestList = (List<Map<String, Object>>) allPendingRequest.get(wfStatusEntity.getUserId());
+		} else {
+			pendingRequestList = new ArrayList<>();
+		}
+		pendingRequestList.add(updateKeyValue);
+		allPendingRequest.put(wfStatusEntity.getUserId(), pendingRequestList);
 	}
 
 	private record ApplicationIdResolution(List<String> applicationIds, long totalSearchCount,
@@ -1484,6 +1516,18 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private Map<String, Object> getUserSearchDetails(Set<String> userIds, boolean isMdoSearch, String rootOrgId) throws IOException {
+		Map<String, Object> request = buildUserSearchFilterRequest(userIds, isMdoSearch, rootOrgId);
+		HashMap<String, String> headersValue = new HashMap<>();
+		headersValue.put("Content-Type", "application/json");
+		Map<String, Object> allUserDetails = new HashMap<>();
+		StringBuilder url = new StringBuilder(configuration.getLmsServiceHost())
+				.append(configuration.getLmsUserSearchEndPoint());
+		Map<String, Object> searchProfileApiResp = (Map<String, Object>) requestServiceImpl.fetchResultUsingPostUnhandled(url, request, Map.class, headersValue);
+		populateUserSearchDetails(searchProfileApiResp, isMdoSearch, allUserDetails);
+		return allUserDetails;
+	}
+
+	private Map<String, Object> buildUserSearchFilterRequest(Set<String> userIds, boolean isMdoSearch, String rootOrgId) {
 		List<String> fields = new ArrayList<>();
 		Map<String, Object> filters = new HashMap<>();
 		filters.put(Constants.USER_ID, userIds);
@@ -1497,47 +1541,54 @@ public class WorkflowServiceImpl implements Workflowservice {
 			fields.add(Constants.PROFILE_DETAILS_PERSONAL_DETAILS_FIRST_NAME);
 			fields.add(Constants.PROFILE_DETAILS_PERSONAL_DETAILS_PRIMARY_EMAIL);
 		}
-		Map<String, Object> request = this.getSearchObject(fields, filters);
-		HashMap<String, String> headersValue = new HashMap<>();
-		headersValue.put("Content-Type", "application/json");
-		Map<String, Object> allUserDetails = new HashMap<>();
-		StringBuilder url = new StringBuilder(configuration.getLmsServiceHost())
-				.append(configuration.getLmsUserSearchEndPoint());
-		Map<String, Object> searchProfileApiResp = (Map<String, Object>) requestServiceImpl.fetchResultUsingPostUnhandled(url, request, Map.class, headersValue);
-		if (searchProfileApiResp != null
-				&& "OK".equalsIgnoreCase((String) searchProfileApiResp.get(Constants.RESPONSE_CODE))) {
-			Map<String, Object> map = (Map<String, Object>) searchProfileApiResp.get(Constants.RESULT);
-			Map<String, Object> response = (Map<String, Object>) map.get(Constants.RESPONSE);
-			List<Map<String, Object>> contents = (List<Map<String, Object>>) response.get(Constants.CONTENT);
-			if (!CollectionUtils.isEmpty(contents)) {
-				Map<String, Object> mdoDetails = new HashMap<>();
-				if (isMdoSearch) {
-					Map<String, Object> mdoDetailsResponse = contents.get(0);
-					mdoDetails.put(Constants.USER_ID, mdoDetailsResponse.get(Constants.USER_ID));
-					mdoDetails.put(Constants.ROOT_ORG_ID, mdoDetailsResponse.get(Constants.ROOT_ORG_ID));
-					mdoDetails.put(Constants.ROOT_ORG_NAME, mdoDetailsResponse.get(Constants.ROOT_ORG_NAME));
-					allUserDetails.put((String) mdoDetailsResponse.get(Constants.USER_ID), mdoDetails);
-				} else {
-					for (Map<String, Object> content : contents) {
+		return this.getSearchObject(fields, filters);
+	}
 
-						HashMap<String, Object> profileDetails = (HashMap<String, Object>) content
-								.get(Constants.PROFILE_DETAILS);
-						if (!CollectionUtils.isEmpty(profileDetails)) {
-							HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
-									.get(Constants.PERSONAL_DETAILS);
-							if (!CollectionUtils.isEmpty(personalDetails)) {
-								Map<String, Object> userPersonalInfo = new HashMap<>();
-								userPersonalInfo.put(Constants.FIRSTNAME, personalDetails.get(Constants.FIRSTNAME));
-								userPersonalInfo.put(Constants.MOBILE_NUMBER, personalDetails.get(Constants.MOBILE));
-								userPersonalInfo.put(Constants.PRIMARY_EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
-								allUserDetails.put((String) content.get(Constants.USER_ID), userPersonalInfo);
-							}
-						}
-					}
-				}
-			}
+	private void populateUserSearchDetails(Map<String, Object> searchProfileApiResp, boolean isMdoSearch,
+			Map<String, Object> allUserDetails) {
+		if (searchProfileApiResp == null
+				|| !"OK".equalsIgnoreCase((String) searchProfileApiResp.get(Constants.RESPONSE_CODE))) {
+			return;
 		}
-		return allUserDetails;
+		Map<String, Object> map = (Map<String, Object>) searchProfileApiResp.get(Constants.RESULT);
+		Map<String, Object> response = (Map<String, Object>) map.get(Constants.RESPONSE);
+		List<Map<String, Object>> contents = (List<Map<String, Object>>) response.get(Constants.CONTENT);
+		if (CollectionUtils.isEmpty(contents)) {
+			return;
+		}
+		if (isMdoSearch) {
+			populateMdoDetails(contents, allUserDetails);
+		} else {
+			populateUserPersonalDetails(contents, allUserDetails);
+		}
+	}
+
+	private void populateMdoDetails(List<Map<String, Object>> contents, Map<String, Object> allUserDetails) {
+		Map<String, Object> mdoDetails = new HashMap<>();
+		Map<String, Object> mdoDetailsResponse = contents.get(0);
+		mdoDetails.put(Constants.USER_ID, mdoDetailsResponse.get(Constants.USER_ID));
+		mdoDetails.put(Constants.ROOT_ORG_ID, mdoDetailsResponse.get(Constants.ROOT_ORG_ID));
+		mdoDetails.put(Constants.ROOT_ORG_NAME, mdoDetailsResponse.get(Constants.ROOT_ORG_NAME));
+		allUserDetails.put((String) mdoDetailsResponse.get(Constants.USER_ID), mdoDetails);
+	}
+
+	private void populateUserPersonalDetails(List<Map<String, Object>> contents, Map<String, Object> allUserDetails) {
+		for (Map<String, Object> content : contents) {
+			HashMap<String, Object> profileDetails = (HashMap<String, Object>) content.get(Constants.PROFILE_DETAILS);
+			if (CollectionUtils.isEmpty(profileDetails)) {
+				continue;
+			}
+			HashMap<String, Object> personalDetails = (HashMap<String, Object>) profileDetails
+					.get(Constants.PERSONAL_DETAILS);
+			if (CollectionUtils.isEmpty(personalDetails)) {
+				continue;
+			}
+			Map<String, Object> userPersonalInfo = new HashMap<>();
+			userPersonalInfo.put(Constants.FIRSTNAME, personalDetails.get(Constants.FIRSTNAME));
+			userPersonalInfo.put(Constants.MOBILE_NUMBER, personalDetails.get(Constants.MOBILE));
+			userPersonalInfo.put(Constants.PRIMARY_EMAIL, personalDetails.get(Constants.PRIMARY_EMAIL));
+			allUserDetails.put((String) content.get(Constants.USER_ID), userPersonalInfo);
+		}
 	}
 
 	private ResponseEntity<Object> preparePendingRequestFileResponse(String csvFilePath, int size) throws IOException {
@@ -1761,6 +1812,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 	private List<String> callUserSearchApiToGetMdoleaderUserId(String doptName, String rootOrgId) {
 		StringBuilder url = new StringBuilder(configuration.getLmsServiceHost()).append(configuration.getLmsUserSearchEndPoint());
+		Map<String, Object> finalRequest = buildMdoLeaderSearchRequest(doptName, rootOrgId);
+		HashMap<String, String> headersValue = new HashMap<>();
+		headersValue.put(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+		Object response = requestServiceImpl.fetchResultUsingPost(url, finalRequest, Map.class, headersValue);
+		return extractMdoLeaderUserIds(response);
+	}
+
+	private Map<String, Object> buildMdoLeaderSearchRequest(String doptName, String rootOrgId) {
 		Map<String, Object> filters = new HashMap<>();
 		if (StringUtils.hasLength(rootOrgId)) {
 			filters.put("rootOrgId", rootOrgId);
@@ -1776,27 +1835,29 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 		Map<String, Object> finalRequest = new HashMap<>();
 		finalRequest.put("request", requestMap);
-		HashMap<String, String> headersValue = new HashMap<>();
-		headersValue.put(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
-		Object response = requestServiceImpl.fetchResultUsingPost(url, finalRequest, Map.class, headersValue);
+		return finalRequest;
+	}
+
+	private List<String> extractMdoLeaderUserIds(Object response) {
 		List<String> userIds = new ArrayList<>();
-		if (response instanceof Map<?, ?> responseMap) {
-			Object resultObj = responseMap.get("result");
-			if (resultObj instanceof Map<?, ?> resultMap) {
-				Object responseObj = resultMap.get("response");
-				if (responseObj instanceof Map<?, ?> responseContent) {
-					Object contentListObj = responseContent.get("content");
-					if (contentListObj instanceof List<?> contentList) {
-						for (Object userObj : contentList) {
-							if (userObj instanceof Map<?, ?> userMap) {
-								Object userId = userMap.get("userId");
-								if (userId instanceof String userIdStr) {
-									userIds.add(userIdStr);
-								}
-							}
-						}
-					}
-				}
+		if (!(response instanceof Map<?, ?> responseMap)) {
+			return userIds;
+		}
+		Object resultObj = responseMap.get("result");
+		if (!(resultObj instanceof Map<?, ?> resultMap)) {
+			return userIds;
+		}
+		Object responseObj = resultMap.get("response");
+		if (!(responseObj instanceof Map<?, ?> responseContent)) {
+			return userIds;
+		}
+		Object contentListObj = responseContent.get("content");
+		if (!(contentListObj instanceof List<?> contentList)) {
+			return userIds;
+		}
+		for (Object userObj : contentList) {
+			if (userObj instanceof Map<?, ?> userMap && userMap.get("userId") instanceof String userIdStr) {
+				userIds.add(userIdStr);
 			}
 		}
 		return userIds;

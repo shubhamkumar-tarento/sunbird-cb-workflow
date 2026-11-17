@@ -99,6 +99,93 @@ public class NotificationServiceImpl {
 
 	private static final String ROLE_TAG = "#role";
 
+	private record MailContent(String subject, String body) {}
+
+	private void logWorkflowStatusForDebug(WfStatusEntity wfStatusEntity, WfStatus wfStatus) {
+		if (!logger.isInfoEnabled()) {
+			return;
+		}
+		try {
+			logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
+			logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
+		} catch (JsonProcessingException e) {
+			logger.error("Failed to serialize workflow status for logging", e);
+		}
+	}
+
+	private Set<String> buildNotificationUserIds(WfRequest wfRequest, WfStatusEntity wfStatusEntity, Set<String> blendedProgrammeServiceNames) {
+		Set<String> usersId = new HashSet<>();
+		usersId.add(wfRequest.getUserId());
+		if (!blendedProgrammeServiceNames.contains(wfRequest.getServiceName())) {
+			usersId.add(wfStatusEntity.getApplicationId());
+		}
+		return usersId;
+	}
+
+	private MailContent buildBlendedProgramMailContent(WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
+		String forwardedMailBody = configuration.getLearnerForwardedMailBody()
+				.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
+				.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
+				.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
+		String subjectLine;
+		String body;
+		switch (wfStatusEntity.getCurrentStatus()){
+			case Constants.SEND_FOR_PC_APPROVAL:
+				subjectLine = BP_MDO_PC_SUBJECT_LINE.replace(ROLE_TAG,Constants.PROGRAM_COORDINATOR.replace("_"," "));
+				body = forwardedMailBody.replace(ROLE_TAG,Constants.PROGRAM_COORDINATOR.replace("_"," "));
+				break;
+			case Constants.SEND_FOR_MDO_APPROVAL:
+				subjectLine = BP_MDO_PC_SUBJECT_LINE.replace(ROLE_TAG,Constants.MDO_ADMIN.split("_")[0]);
+				body = forwardedMailBody.replace(ROLE_TAG,Constants.MDO_ADMIN.split("_")[0]);
+				break;
+			case Constants.APPROVED:
+				subjectLine = ENROLMENT_ACTION_SUBJECT.replace(ACT_TAG, wfStatusEntity.getCurrentStatus());
+				body = configuration.getApprovedMailBody()
+						.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
+						.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
+						.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
+				break;
+			case Constants.REJECTED, Constants.REMOVED:
+				subjectLine = ENROLMENT_ACTION_SUBJECT.replace(ACT_TAG, wfStatusEntity.getCurrentStatus());
+				body = configuration.getRejectedOrRemovedMailBody()
+						.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
+						.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
+						.replace(ACT_TAG,wfStatusEntity.getCurrentStatus())
+						.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
+				break;
+			default:
+				subjectLine = MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
+				body = BP_MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
+				break;
+		}
+		return new MailContent(subjectLine, body);
+	}
+
+	private MailContent buildFieldUpdateMailContent(WfStatusEntity wfStatusEntity, HashMap<String, Object> updatedFieldValue) {
+		HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get(TO_VALUE_CONST);
+		String body = MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus())
+				.replace(FIELD_KEY_TAG, toValue.entrySet().iterator().next().getKey()).replace(TO_VALUE_TAG, (String) toValue.entrySet().iterator().next().getValue());
+		String subjectLine = MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
+		return new MailContent(subjectLine, body);
+	}
+
+	private MailContent buildMailContent(WfRequest wfRequest, WfStatusEntity wfStatusEntity, Set<String> blendedProgrammeServiceNames, Optional<HashMap<String, Object>> updatedFieldValue) {
+		if (!updatedFieldValue.isPresent()) {
+			return new MailContent("", "");
+		}
+		if (blendedProgrammeServiceNames.contains(wfRequest.getServiceName())) {
+			return buildBlendedProgramMailContent(wfRequest, wfStatusEntity);
+		}
+		return buildFieldUpdateMailContent(wfStatusEntity, updatedFieldValue.get());
+	}
+
+	private String applyCommentSuffix(String body, String comment) {
+		if (StringUtils.isNotBlank(comment)) {
+			return body.substring(0, body.length() - 1) + DUE_TO_PREFIX + comment + BOLD_CLOSE_SUFFIX;
+		}
+		return body;
+	}
+
 	/**
 	 * Send notification to the user based on state of application
 	 *
@@ -109,87 +196,62 @@ public class NotificationServiceImpl {
 				wfRequest.getWfId());
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
-		if (logger.isInfoEnabled()) {
-			try {
-				logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
-				logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
-			} catch (JsonProcessingException e) {
-				logger.error("Failed to serialize workflow status for logging", e);
-			}
-		}
+		logWorkflowStatusForDebug(wfStatusEntity, wfStatus);
 		if (Constants.PROFILE_SERVICE_NAME.equalsIgnoreCase(wfRequest.getServiceName()) && Constants.WITHDRAWN.equalsIgnoreCase(wfStatusEntity.getCurrentStatus())) {
 			return;
 		}
-		if (Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
-			logger.info("Enter's in the notification block");
-            Set<String> usersId = new HashSet<>();
-            usersId.add(wfRequest.getUserId());
-            Set<String> blendedProgrammeServiceNames = new HashSet<>(Arrays.asList(Constants.BLENDED_PROGRAM_SERVICE_NAME,
-                    Constants.ONE_STEP_MDO_APPROVAL,
-                    Constants.ONE_STEP_PC_APPROVAL,
-                    Constants.TWO_STEP_MDO_AND_PC_APPROVAL,
-                    Constants.TWO_STEP_PC_AND_MDO_APPROVAL));
-			if(!blendedProgrammeServiceNames.contains(wfRequest.getServiceName())){
-				usersId.add(wfStatusEntity.getApplicationId());
-			}
-			HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(usersId);
-			Map<String, Object> senderInfo = (Map<String, Object>)usersObj.get(wfRequest.getUserId());
-			Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
-			String subjectLine = "";
-			String body = "";
-			if (updatedFieldValue.isPresent()) {
-				if (blendedProgrammeServiceNames.contains(wfRequest.getServiceName())) {
-					String forwardedMailBody = configuration.getLearnerForwardedMailBody()
-							.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
-							.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
-							.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
-					switch (wfStatusEntity.getCurrentStatus()){
-						case Constants.SEND_FOR_PC_APPROVAL:
-							subjectLine = BP_MDO_PC_SUBJECT_LINE.replace(ROLE_TAG,Constants.PROGRAM_COORDINATOR.replace("_"," "));
-							body = forwardedMailBody.replace(ROLE_TAG,Constants.PROGRAM_COORDINATOR.replace("_"," "));
-							break;
-						case Constants.SEND_FOR_MDO_APPROVAL:
-							subjectLine = BP_MDO_PC_SUBJECT_LINE.replace(ROLE_TAG,Constants.MDO_ADMIN.split("_")[0]);
-							body = forwardedMailBody.replace(ROLE_TAG,Constants.MDO_ADMIN.split("_")[0]);
-							break;
-						case Constants.APPROVED:
-							subjectLine = ENROLMENT_ACTION_SUBJECT.replace(ACT_TAG, wfStatusEntity.getCurrentStatus());
-							body = configuration.getApprovedMailBody()
-									.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
-									.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
-									.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
-							break;
-						case Constants.REJECTED, Constants.REMOVED:
-							subjectLine = ENROLMENT_ACTION_SUBJECT.replace(ACT_TAG, wfStatusEntity.getCurrentStatus());
-							body = configuration.getRejectedOrRemovedMailBody()
-									.replace(BATCH_NAME_TAG, wfRequest.getBatchName())
-									.replace(COURSE_NAME_TAG, wfRequest.getCourseName())
-									.replace(ACT_TAG,wfStatusEntity.getCurrentStatus())
-									.replace(BATCH_START_DATE_TAG, wfRequest.getBatchStartDate().toString());
-							break;
-						default:
-							subjectLine = MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
-							body = BP_MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
-							break;
-					}
-				}
-				else {
-					HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get().get(TO_VALUE_CONST);
-					body = MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus())
-							.replace(FIELD_KEY_TAG, toValue.entrySet().iterator().next().getKey()).replace(TO_VALUE_TAG, (String) toValue.entrySet().iterator().next().getValue());
-					subjectLine = MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus());
-				}
-			}
-			if (StringUtils.isNotBlank(wfRequest.getComment())) {
-				body = body.substring(0, body.length() - 1) + DUE_TO_PREFIX + wfRequest.getComment() + BOLD_CLOSE_SUFFIX;
-			}
-			Map<String, Object> mailNotificationDetails = new HashMap<>();
-			mailNotificationDetails.put(Constants.EMAIL_TO, senderInfo.get(Constants.FIRST_NAME));
-			mailNotificationDetails.put("body", body);
-			mailNotificationDetails.put(Constants.SUBJECT, subjectLine);
-			mailNotificationDetails.put(Constants.EMAIL_LIST, Collections.singletonList(senderInfo.get(Constants.EMAIL)));
-			sendNotificationEmail(mailNotificationDetails);
+		if (!Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
+			return;
 		}
+		logger.info("Enter's in the notification block");
+		Set<String> blendedProgrammeServiceNames = new HashSet<>(Arrays.asList(Constants.BLENDED_PROGRAM_SERVICE_NAME,
+				Constants.ONE_STEP_MDO_APPROVAL,
+				Constants.ONE_STEP_PC_APPROVAL,
+				Constants.TWO_STEP_MDO_AND_PC_APPROVAL,
+				Constants.TWO_STEP_PC_AND_MDO_APPROVAL));
+		Set<String> usersId = buildNotificationUserIds(wfRequest, wfStatusEntity, blendedProgrammeServiceNames);
+		HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(usersId);
+		Map<String, Object> senderInfo = (Map<String, Object>)usersObj.get(wfRequest.getUserId());
+		Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
+		MailContent mailContent = buildMailContent(wfRequest, wfStatusEntity, blendedProgrammeServiceNames, updatedFieldValue);
+		String body = applyCommentSuffix(mailContent.body(), wfRequest.getComment());
+		Map<String, Object> mailNotificationDetails = new HashMap<>();
+		mailNotificationDetails.put(Constants.EMAIL_TO, senderInfo.get(Constants.FIRST_NAME));
+		mailNotificationDetails.put("body", body);
+		mailNotificationDetails.put(Constants.SUBJECT, mailContent.subject());
+		mailNotificationDetails.put(Constants.EMAIL_LIST, Collections.singletonList(senderInfo.get(Constants.EMAIL)));
+		sendNotificationEmail(mailNotificationDetails);
+	}
+
+	private Set<String> extractFirstEmail(List<HashMap<String, Object>> updatedFieldValues) {
+		Set<String> emailSet = new HashSet<>();
+		// Find the email address from the updated field values
+		for (Map<String, Object> fieldValue : updatedFieldValues) {
+			if (fieldValue.containsKey(Constants.EMAIL)) {
+				String email = (String) fieldValue.get(Constants.EMAIL);
+				emailSet.add(email);
+				break;
+			}
+		}
+		return emailSet;
+	}
+
+	private HashMap<String, Object> buildEmailNotificationParams(WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
+		HashMap<String, Object> params = new HashMap<>();
+		Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
+		if (updatedFieldValue.isPresent()) {
+			HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get().get(TO_VALUE_CONST);
+			params.put("body", MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus())
+					.replace(FIELD_KEY_TAG, toValue.entrySet().iterator().next().getKey()).replace(TO_VALUE_TAG, (String) toValue.entrySet().iterator().next().getValue()));
+		}
+		if (StringUtils.isNotBlank(wfRequest.getComment())) {
+			String body = (String) params.get("body");
+			body = body.substring(0, body.length() - 1);
+			body = body + DUE_TO_PREFIX + wfRequest.getComment() + BOLD_CLOSE_SUFFIX;
+			params.put("body", body);
+		}
+		params.put("orgImageUrl", null);
+		return params;
 	}
 
 	public void sendEmailNotification(WfRequest wfRequest) {
@@ -197,126 +259,114 @@ public class NotificationServiceImpl {
 				wfRequest.getWfId());
 		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
 				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
-		if (logger.isInfoEnabled()) {
-			try {
-				logger.info("Notification workflow status entity, {}", mapper.writeValueAsString(wfStatusEntity));
-				logger.info("Notification workflow status model, {}", mapper.writeValueAsString(wfStatus));
-			} catch (JsonProcessingException e) {
-				logger.error("Failed to serialize workflow status for logging", e);
-			}
+		logWorkflowStatusForDebug(wfStatusEntity, wfStatus);
+		if (!Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
+			return;
 		}
-		if (Boolean.TRUE.equals(wfStatus.getNotificationEnable())) {
-			logger.info("Enters in the email notification block");
-			List<HashMap<String, Object>> updatedFieldValues = wfRequest.getUpdateFieldValues();
-			Set<String> emailSet = new HashSet<>();
-			// Find the email address from the updated field values
-			for (Map<String, Object> fieldValue : updatedFieldValues) {
-				if (fieldValue.containsKey(Constants.EMAIL)) {
-					String email = (String) fieldValue.get(Constants.EMAIL);
-					emailSet.add(email);
-					break;
-				}
-			}
-			if (!emailSet.isEmpty()) {
-				HashMap<String, Object> params = new HashMap<>();
-				NotificationRequest request = new NotificationRequest();
-				request.setDeliveryType(Constants.MESSAGE);
-				request.setIds(new ArrayList<>(emailSet));
-				request.setMode(Constants.EMAIL);
-				Template template = new Template();
-				template.setId(EMAILTEMPLATE);
-				Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
-				if (updatedFieldValue.isPresent()) {
-					HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get().get(TO_VALUE_CONST);
-					params.put("body", MAIL_BODY.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus())
-							.replace(FIELD_KEY_TAG, toValue.entrySet().iterator().next().getKey()).replace(TO_VALUE_TAG, (String) toValue.entrySet().iterator().next().getValue()));
-				}
-				if (StringUtils.isNotBlank(wfRequest.getComment())) {
-					String body = (String) params.get("body");
-					body = body.substring(0, body.length() - 1);
-					body = body + DUE_TO_PREFIX + wfRequest.getComment() + BOLD_CLOSE_SUFFIX;
-					params.put("body", body);
-				}
-				params.put("orgImageUrl", null);
-				template.setParams(params);
-				Config config = new Config();
-				config.setSubject(MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus()));
-				config.setSender(configuration.getSenderMail());
-				Map<String, Object> req = new HashMap<>();
-				request.setTemplate(template);
-				request.setConfig(config);
-				Map<String, List<NotificationRequest>> notificationMap = new HashMap<>();
-				notificationMap.put(Constants.NOTIFICATIONS, Arrays.asList(request));
-				req.put(Constants.REQUEST, notificationMap);
-				sendNotification(req);
-			} else {
-				logger.warn("Email address not found in the update field values.");
-			}
+		logger.info("Enters in the email notification block");
+		Set<String> emailSet = extractFirstEmail(wfRequest.getUpdateFieldValues());
+		if (emailSet.isEmpty()) {
+			logger.warn("Email address not found in the update field values.");
+			return;
 		}
+		HashMap<String, Object> params = buildEmailNotificationParams(wfRequest, wfStatusEntity);
+		NotificationRequest request = new NotificationRequest();
+		request.setDeliveryType(Constants.MESSAGE);
+		request.setIds(new ArrayList<>(emailSet));
+		request.setMode(Constants.EMAIL);
+		Template template = new Template();
+		template.setId(EMAILTEMPLATE);
+		template.setParams(params);
+		Config config = new Config();
+		config.setSubject(MAIL_SUBJECT.replace(STATE_NAME_TAG, wfStatusEntity.getCurrentStatus()));
+		config.setSender(configuration.getSenderMail());
+		Map<String, Object> req = new HashMap<>();
+		request.setTemplate(template);
+		request.setConfig(config);
+		Map<String, List<NotificationRequest>> notificationMap = new HashMap<>();
+		notificationMap.put(Constants.NOTIFICATIONS, Arrays.asList(request));
+		req.put(Constants.REQUEST, notificationMap);
+		sendNotification(req);
 	}
 
-	public void sendNotificationToMdoAdmin(WfRequest wfRequest) throws IOException {
-		WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(),
-				wfRequest.getWfId());
+	private String resolveFieldKeyFromUpdatedValues(List<HashMap<String, Object>> values) {
 		String fieldKey = null;
-		List<HashMap<String, Object>> values =  wfRequest.getUpdateFieldValues();
-		for(Map<String, Object> fieldMap : values){
-			if(!fieldMap.containsKey(Constants.TO_VALUE))
+		for (Map<String, Object> fieldMap : values) {
+			if (!fieldMap.containsKey(Constants.TO_VALUE)) {
 				continue;
-			Map<String, Object> toValueMap= (Map<String, Object>) fieldMap.get(Constants.TO_VALUE);
+			}
+			Map<String, Object> toValueMap = (Map<String, Object>) fieldMap.get(Constants.TO_VALUE);
 			Optional<Map.Entry<String, Object>> firstEntry = toValueMap.entrySet().stream().findFirst();
 			if (firstEntry.isPresent()) {
 				fieldKey = firstEntry.get().getKey();
 			}
 		}
-		if(Constants.APPROVE_STATE.equalsIgnoreCase(wfRequest.getAction()) && Constants.NAME.equalsIgnoreCase(fieldKey)){
-			this.sendMailToMDOForOrgChange(wfRequest);
-		} else{
-			WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
-					wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
-			if (Boolean.TRUE.equals(wfStatus.getNotificationEnable())
-					&& !Arrays.asList(Constants.REJECTED, Constants.APPROVED).contains(wfStatus.getState())) {
-				logger.info("Enter in the notification block");
-				List<String> mdoAdminList = userProfileWfService.getMdoAdminAndPCDetails(wfRequest.getRootOrgId(), Collections.singletonList(Constants.MDO_ADMIN));
-				Map<String, Object> params = new HashMap<>();
-				NotificationRequest request = new NotificationRequest();
-				request.setDeliveryType(Constants.MESSAGE);
-				List<String> mdoMailList = mdoAdminList.stream().toList();
-				if (!CollectionUtils.isEmpty(mdoMailList)) {
-					request.setIds(mdoMailList);
-					request.setMode(Constants.EMAIL);
-					Template template = new Template();
-					template.setId(configuration.getMdoEmailTemplate());
-					HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
-					Map<String, Object> recipientInfo = (Map<String, Object>) usersObj.get(wfStatusEntity.getUserId());
-					params.put(Constants.USER_NAME, recipientInfo.get(Constants.FIRST_NAME));
-					Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
-					if (updatedFieldValue.isPresent()) {
-						HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get().get(TO_VALUE_CONST);
-						List<String> fieldNames = toValue.keySet().stream().toList();
-						String approvalUrl = configuration.getDomainHost() + configuration.getMdoBaseUrl().replace("{id}", wfRequest.getApplicationId());
-						params.put(Constants.LINK, approvalUrl);
-						params.put(Constants.FIELDS, fieldNames);
-						params.put(Constants.SUPPORT_EMAIL, configuration.getSenderMail());
-					}
-					String constructedEmailTemplate = constructEmailTemplate(configuration.getMdoEmailTemplate(), params);
-					if (StringUtils.isNotEmpty(constructedEmailTemplate)) {
-						template.setData(constructedEmailTemplate);
-					}
-					template.setParams(params);
-					Config config = new Config();
-					config.setSubject(MDO_MAIL_SUBJECT);
-					config.setSender(configuration.getSenderMail());
-					Map<String, Object> req = new HashMap<>();
-					request.setTemplate(template);
-					request.setConfig(config);
-					Map<String, List<NotificationRequest>> notificationMap = new HashMap<>();
-					notificationMap.put(Constants.NOTIFICATIONS, Arrays.asList(request));
-					req.put(Constants.REQUEST, notificationMap);
-					sendNotification(req);
-				}
-			}
+		return fieldKey;
+	}
+
+	private Map<String, Object> buildMdoAdminNotificationParams(WfRequest wfRequest, WfStatusEntity wfStatusEntity) {
+		Map<String, Object> params = new HashMap<>();
+		HashMap<String, Object> usersObj = userProfileWfService.getUsersResult(Collections.singleton(wfRequest.getUserId()));
+		Map<String, Object> recipientInfo = (Map<String, Object>) usersObj.get(wfStatusEntity.getUserId());
+		params.put(Constants.USER_NAME, recipientInfo.get(Constants.FIRST_NAME));
+		Optional<HashMap<String, Object>> updatedFieldValue = wfRequest.getUpdateFieldValues().stream().findFirst();
+		if (updatedFieldValue.isPresent()) {
+			HashMap<String, Object> toValue = (HashMap<String, Object>) updatedFieldValue.get().get(TO_VALUE_CONST);
+			List<String> fieldNames = toValue.keySet().stream().toList();
+			String approvalUrl = configuration.getDomainHost() + configuration.getMdoBaseUrl().replace("{id}", wfRequest.getApplicationId());
+			params.put(Constants.LINK, approvalUrl);
+			params.put(Constants.FIELDS, fieldNames);
+			params.put(Constants.SUPPORT_EMAIL, configuration.getSenderMail());
 		}
+		return params;
+	}
+
+	private void sendMdoAdminNotification(WfRequest wfRequest, WfStatusEntity wfStatusEntity) throws IOException {
+		WfStatus wfStatus = workflowservice.getWorkflowStates(wfStatusEntity.getRootOrg(), wfStatusEntity.getOrg(),
+				wfStatusEntity.getServiceName(), wfStatusEntity.getCurrentStatus());
+		if (!Boolean.TRUE.equals(wfStatus.getNotificationEnable())
+				|| Arrays.asList(Constants.REJECTED, Constants.APPROVED).contains(wfStatus.getState())) {
+			return;
+		}
+		logger.info("Enter in the notification block");
+		List<String> mdoAdminList = userProfileWfService.getMdoAdminAndPCDetails(wfRequest.getRootOrgId(), Collections.singletonList(Constants.MDO_ADMIN));
+		NotificationRequest request = new NotificationRequest();
+		request.setDeliveryType(Constants.MESSAGE);
+		List<String> mdoMailList = mdoAdminList.stream().toList();
+		if (CollectionUtils.isEmpty(mdoMailList)) {
+			return;
+		}
+		request.setIds(mdoMailList);
+		request.setMode(Constants.EMAIL);
+		Template template = new Template();
+		template.setId(configuration.getMdoEmailTemplate());
+		Map<String, Object> params = buildMdoAdminNotificationParams(wfRequest, wfStatusEntity);
+		String constructedEmailTemplate = constructEmailTemplate(configuration.getMdoEmailTemplate(), params);
+		if (StringUtils.isNotEmpty(constructedEmailTemplate)) {
+			template.setData(constructedEmailTemplate);
+		}
+		template.setParams(params);
+		Config config = new Config();
+		config.setSubject(MDO_MAIL_SUBJECT);
+		config.setSender(configuration.getSenderMail());
+		Map<String, Object> req = new HashMap<>();
+		request.setTemplate(template);
+		request.setConfig(config);
+		Map<String, List<NotificationRequest>> notificationMap = new HashMap<>();
+		notificationMap.put(Constants.NOTIFICATIONS, Arrays.asList(request));
+		req.put(Constants.REQUEST, notificationMap);
+		sendNotification(req);
+	}
+
+	public void sendNotificationToMdoAdmin(WfRequest wfRequest) throws IOException {
+		WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(),
+				wfRequest.getWfId());
+		String fieldKey = resolveFieldKeyFromUpdatedValues(wfRequest.getUpdateFieldValues());
+		if (Constants.APPROVE_STATE.equalsIgnoreCase(wfRequest.getAction()) && Constants.NAME.equalsIgnoreCase(fieldKey)) {
+			this.sendMailToMDOForOrgChange(wfRequest);
+			return;
+		}
+		sendMdoAdminNotification(wfRequest, wfStatusEntity);
 	}
 
 	public void sendNotificationToMdoAdminAndPC(WfRequest wfRequest) {
