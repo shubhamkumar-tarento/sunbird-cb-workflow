@@ -14,7 +14,6 @@ import org.sunbird.workflow.service.ContentReadService;
 import org.sunbird.workflow.service.Workflowservice;
 import org.sunbird.workflow.utils.CassandraOperation;
 
-import java.io.IOException;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -199,7 +198,7 @@ class NotificationServiceImplTest {
     }
 
     @Test
-    void sendNotificationToMdoAdmin_shouldSendMailToMDOForOrgChange() throws IOException {
+    void sendNotificationToMdoAdmin_shouldSendMailToMDOForOrgChange() {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setApplicationId("appId");
         wfRequest.setWfId("wfId");
@@ -219,7 +218,7 @@ class NotificationServiceImplTest {
     }
 
     @Test
-    void sendNotificationToMdoAdmin_shouldSendNotificationToMdoAdminForNonOrgChange() throws IOException {
+    void sendNotificationToMdoAdmin_shouldSendNotificationToMdoAdminForNonOrgChange() {
 
         WfRequest wfRequest;
         HashMap<String, Object> updateFieldValues;
