@@ -13,12 +13,10 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
-import org.sunbird.workflow.exception.ApplicationException;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.service.impl.NotificationServiceImpl;
 import org.sunbird.workflow.utils.CassandraOperation;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -63,11 +61,7 @@ public class NotificationConsumerV2 {
                 case Constants.PROFILE_SERVICE_NAME:
                     wfRequests.forEach(wfRequest -> {
                         notificationService.sendNotification(wfRequest);
-                        try {
-                            notificationService.sendNotificationToMdoAdmin(wfRequest);
-                        } catch (IOException e) {
-                            throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
-                        }
+                        notificationService.sendNotificationToMdoAdmin(wfRequest);
                     });
                     break;
                 case Constants.POSITION_SERVICE_NAME, Constants.DOMAIN_SERVICE_NAME, Constants.ORGANISATION_SERVICE_NAME:
