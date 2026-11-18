@@ -237,7 +237,7 @@ public class UserBulkUploadService {
         RowEmailPhoneValidation result = new RowEmailPhoneValidation();
         String email = validateEmailForRow(nextRow, errList, result);
         validatePhoneForRow(nextRow, errList, result);
-        applyEmailOrPhoneExistenceCheck(email, errList, result);
+        applyEmailOrPhoneExistenceCheck(email, result);
         return result;
     }
 
@@ -284,7 +284,7 @@ public class UserBulkUploadService {
         result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
     }
 
-    private void applyEmailOrPhoneExistenceCheck(String email, List<String> errList, RowEmailPhoneValidation result) {
+    private void applyEmailOrPhoneExistenceCheck(String email, RowEmailPhoneValidation result) {
         if (!(StringUtils.hasLength(result.phoneNumber) && result.isEmailValid)) {
             return;
         }
@@ -967,7 +967,7 @@ public class UserBulkUploadService {
 
         Map<String, Object> userDetails = validateEmailFieldV1(email, emailExists, errList, result);
         validatePhoneFieldV1(phone, phoneExists, errList, result);
-        applyEmailOrPhoneExistenceCheckV1(email, phone, errList, result);
+        applyEmailOrPhoneExistenceCheckV1(email, phone, result);
 
         result.userDetails = userDetails;
         return result;
@@ -988,11 +988,11 @@ public class UserBulkUploadService {
 
     private Map<String, Object> validateEmailFieldV1(String email, boolean emailExists, List<String> errList, EmailPhoneValidation result) {
         if (!emailExists) {
-            return null;
+            return Collections.emptyMap();
         }
         if (!ValidationUtil.validateEmailPattern(email)) {
             errList.add("Invalid Email format");
-            return null;
+            return Collections.emptyMap();
         }
         Map<String, Object> userDetails = new HashMap<>();
         Map<String, Object> filters = new HashMap<>();
@@ -1015,7 +1015,7 @@ public class UserBulkUploadService {
         result.isPhoneNumberValid = this.verifyUserRecordExists(filters, userDetailsForMobile);
     }
 
-    private void applyEmailOrPhoneExistenceCheckV1(String email, String phone, List<String> errList, EmailPhoneValidation result) {
+    private void applyEmailOrPhoneExistenceCheckV1(String email, String phone, EmailPhoneValidation result) {
         if (!(StringUtils.hasLength(phone) && result.isEmailValid)) {
             return;
         }

@@ -358,7 +358,7 @@ public class NotificationServiceImpl {
 		sendNotification(req);
 	}
 
-	public void sendNotificationToMdoAdmin(WfRequest wfRequest) throws IOException {
+	public void sendNotificationToMdoAdmin(WfRequest wfRequest) {
 		WfStatusEntity wfStatusEntity = wfStatusRepo.findByApplicationIdAndWfId(wfRequest.getApplicationId(),
 				wfRequest.getWfId());
 		String fieldKey = resolveFieldKeyFromUpdatedValues(wfRequest.getUpdateFieldValues());
