@@ -85,21 +85,8 @@ public class RequestServiceImpl {
 		ObjectMapper localMapper = new ObjectMapper();
 		localMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 		Object response = null;
-		StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(FETCH_RESULT_LOG_PREFIX)
-				.append(System.lineSeparator());
-		str.append(URI_LOG_PREFIX).append(uri.toString()).append(System.lineSeparator());
 		try {
-			str.append(REQUEST_LOG_PREFIX).append(localMapper.writeValueAsString(request)).append(System.lineSeparator());
-			String message = str.toString();
-			log.info(message);
-			HttpHeaders headers = new HttpHeaders();
-			if (!ObjectUtils.isEmpty(headersValue)) {
-				for (Map.Entry<String, String> map : headersValue.entrySet()) {
-					headers.set(map.getKey(), map.getValue());
-				}
-			}
-			headers.set(Constants.ROOT_ORG_CONSTANT, configuration.getHubRootOrg());
-			HttpEntity<Object> entity = new HttpEntity<>(request, headers);
+			HttpEntity<Object> entity = buildPostEntity(uri, request, headersValue, localMapper);
 			response = restTemplate.postForObject(uri.toString(), entity, objectType);
 		} catch (HttpClientErrorException e) {
 			log.error(EXTERNAL_SERVICE_EXCEPTION_LOG, e);
@@ -107,6 +94,24 @@ public class RequestServiceImpl {
 			log.error(GENERIC_EXTERNAL_SERVICE_EXCEPTION_LOG, e);
 		}
 		return response;
+	}
+
+	private HttpEntity<Object> buildPostEntity(StringBuilder uri, Object request, Map<String, String> headersValue,
+			ObjectMapper localMapper) throws JsonProcessingException {
+		StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(FETCH_RESULT_LOG_PREFIX)
+				.append(System.lineSeparator());
+		str.append(URI_LOG_PREFIX).append(uri.toString()).append(System.lineSeparator());
+		str.append(REQUEST_LOG_PREFIX).append(localMapper.writeValueAsString(request)).append(System.lineSeparator());
+		String message = str.toString();
+		log.info(message);
+		HttpHeaders headers = new HttpHeaders();
+		if (!ObjectUtils.isEmpty(headersValue)) {
+			for (Map.Entry<String, String> map : headersValue.entrySet()) {
+				headers.set(map.getKey(), map.getValue());
+			}
+		}
+		headers.set(Constants.ROOT_ORG_CONSTANT, configuration.getHubRootOrg());
+		return new HttpEntity<>(request, headers);
 	}
 
 	public Map<String, Object> fetchResultUsingPatch(String uri, Object request, Map<String, String> headersValues) {
@@ -174,21 +179,8 @@ public class RequestServiceImpl {
 		ObjectMapper localMapper = new ObjectMapper();
 		localMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 		Object response = null;
-		StringBuilder str = new StringBuilder(this.getClass().getCanonicalName()).append(FETCH_RESULT_LOG_PREFIX)
-				.append(System.lineSeparator());
-		str.append(URI_LOG_PREFIX).append(uri.toString()).append(System.lineSeparator());
 		try {
-			str.append(REQUEST_LOG_PREFIX).append(localMapper.writeValueAsString(request)).append(System.lineSeparator());
-			String message = str.toString();
-			log.info(message);
-			HttpHeaders headers = new HttpHeaders();
-			if (!ObjectUtils.isEmpty(headersValue)) {
-				for (Map.Entry<String, String> map : headersValue.entrySet()) {
-					headers.set(map.getKey(), map.getValue());
-				}
-			}
-			headers.set(Constants.ROOT_ORG_CONSTANT, configuration.getHubRootOrg());
-			HttpEntity<Object> entity = new HttpEntity<>(request, headers);
+			HttpEntity<Object> entity = buildPostEntity(uri, request, headersValue, localMapper);
 			response = restTemplate.postForObject(uri.toString(), entity, objectType);
 		} catch (HttpClientErrorException e) {
 			log.error(EXTERNAL_SERVICE_EXCEPTION_LOG, e);

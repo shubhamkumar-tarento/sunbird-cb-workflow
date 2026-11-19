@@ -71,13 +71,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 	private final Producer kafkaProducer;
 	private final ElasticsearchServiceManager eServiceManager;
 	private final NotificationTriggerService notificationTriggerService;
+	private final UserUtil userUtil;
 
 	public WorkflowServiceImpl(WfStatusRepo wfStatusRepo, WfAuditRepo wfAuditRepo, ObjectMapper mapper,
 			Configuration configuration, @Lazy UserProfileWfService userProfileWfService,
 			RequestServiceImpl requestServiceImpl, Producer producer, CassandraOperation cassandraOperation,
 			AccessTokenValidator accessTokenValidator, LRUCache<String, List<WfStatusCountDTO>> localCache,
 			StorageService storageService, Producer kafkaProducer, ElasticsearchServiceManager eServiceManager,
-			NotificationTriggerService notificationTriggerService) {
+			NotificationTriggerService notificationTriggerService, UserUtil userUtil) {
 		this.wfStatusRepo = wfStatusRepo;
 		this.wfAuditRepo = wfAuditRepo;
 		this.mapper = mapper;
@@ -92,6 +93,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 		this.kafkaProducer = kafkaProducer;
 		this.eServiceManager = eServiceManager;
 		this.notificationTriggerService = notificationTriggerService;
+		this.userUtil = userUtil;
 	}
 
 	/**
@@ -323,23 +325,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private void addModificationEntry(WfStatusEntity applicationStatus,String userId,String action,String role) throws IOException {
-		if(StringUtils.hasLength(userId) &&
-				Arrays.asList(configuration.getModificationRecordAllowActions().split(Constants.COMMA)).contains(action)) {
-			List<Map<String, Object>> historyMap = null;
-			String history = applicationStatus.getModificationHistory();
-			if (StringUtils.hasLength(history))
-				historyMap = mapper.readValue(history, List.class);
-			else
-				historyMap = new ArrayList<>();
-			Map<String, Object> newModification = new HashMap<>();
-			newModification.put("modifiedDate", new Date());
-			newModification.put("modifiedBy", userId);
-			newModification.put("action", action);
-			newModification.put("role", role);
-			historyMap.add(newModification);
-			applicationStatus.setModificationHistory(mapper.writeValueAsString(historyMap));
-		}
-
+		WorkflowHelperUtil.addModificationEntry(configuration, mapper, applicationStatus, userId, action, role);
 	}
 
 	/**
@@ -442,19 +428,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 * @return Work flow Action
 	 */
 	private WfAction getWfAction(String action, WfStatus wfStatus) {
-		WfAction wfAction = null;
-		if (ObjectUtils.isEmpty(wfStatus.getActions())) {
-			throw new BadRequestException(Constants.WORKFLOW_ACTION_ERROR);
-		}
-		for (WfAction filterAction : wfStatus.getActions()) {
-			if (action.equals(filterAction.getAction())) {
-				wfAction = filterAction;
-			}
-		}
-		if (ObjectUtils.isEmpty(wfAction)) {
-			throw new BadRequestException(Constants.WORKFLOW_ACTION_ERROR);
-		}
-		return wfAction;
+		return WorkflowHelperUtil.getWfAction(action, wfStatus);
 	}
 
 	/**
@@ -465,17 +439,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 * @return Workflow State
 	 */
 	private WfStatus getWfStatus(String state, WorkFlowModel workFlowModel) {
-		WfStatus wfStatus = null;
-		for (WfStatus status : workFlowModel.getWfstates()) {
-			if (status.getState().equals(state)) {
-				wfStatus = status;
-				break;
-			}
-		}
-		if (ObjectUtils.isEmpty(wfStatus)) {
-			throw new BadRequestException(Constants.WORKFLOW_STATE_CHECK_ERROR);
-		}
-		return wfStatus;
+		return WorkflowHelperUtil.getWfStatus(state, workFlowModel);
 	}
 
 	/**
@@ -484,35 +448,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	 * @param wfRequest
 	 */
 	private void validateWfRequest(WfRequest wfRequest) {
-
-		if (!StringUtils.hasLength(wfRequest.getState())) {
-			throw new InvalidDataInputException(Constants.STATE_VALIDATION_ERROR);
-		}
-
-		if (!StringUtils.hasLength(wfRequest.getApplicationId())) {
-			throw new InvalidDataInputException(Constants.APPLICATION_ID_VALIDATION_ERROR);
-		}
-
-		if (!StringUtils.hasLength(wfRequest.getActorUserId())) {
-			throw new InvalidDataInputException(Constants.ACTOR_UUID_VALIDATION_ERROR);
-		}
-
-		if (!StringUtils.hasLength(wfRequest.getUserId())) {
-			throw new InvalidDataInputException(Constants.USER_UUID_VALIDATION_ERROR);
-		}
-
-		if (!StringUtils.hasLength(wfRequest.getAction())) {
-			throw new InvalidDataInputException(Constants.ACTION_VALIDATION_ERROR);
-		}
-
-		if (!Constants.WITHDRAW.equalsIgnoreCase(wfRequest.getAction()) && CollectionUtils.isEmpty(wfRequest.getUpdateFieldValues())) {
-			throw new InvalidDataInputException(Constants.FIELD_VALUE_VALIDATION_ERROR);
-		}
-
-		if (!StringUtils.hasLength(wfRequest.getServiceName())) {
-			throw new InvalidDataInputException(Constants.WORKFLOW_SERVICENAME_VALIDATION_ERROR);
-		}
-
+		WorkflowHelperUtil.validateWfRequest(wfRequest);
 	}
 
 	/**
@@ -867,50 +803,13 @@ public class WorkflowServiceImpl implements Workflowservice {
 
 	public WorkFlowModel getWorkFlowConfig(String serviceName) {
 		try {
-			Map<String, Object> wfConfig;
 			StringBuilder uri = new StringBuilder();
-			switch (serviceName) {
-				case Constants.PROFILE_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getProfileServiceConfigPath());
-					break;
-				case Constants.USER_REGISTRATION_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getUserRegistrationServiceConfigPath());
-					break;
-				case Constants.POSITION_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getPositionServiceConfigPath());
-					break;
-				case Constants.ORGANISATION_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getOrgServiceConfigPath());
-					break;
-				case Constants.DOMAIN_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getDomainServiceConfigPath());
-					break;
-				case Constants.BLENDED_PROGRAM_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost() + configuration.getBlendedProgramServicePath());
-					break;
-				case Constants.ONE_STEP_PC_APPROVAL:
-					uri.append(configuration.getLmsServiceHost()).append(configuration.getMultilevelBPEnrolEndPoint()).append(Constants.ONE_STEP_PC_APPROVAL);
-					break;
-				case Constants.ONE_STEP_MDO_APPROVAL:
-					uri.append(configuration.getLmsServiceHost()).append(configuration.getMultilevelBPEnrolEndPoint()).append(Constants.ONE_STEP_MDO_APPROVAL);
-					break;
-				case Constants.TWO_STEP_MDO_AND_PC_APPROVAL:
-					uri.append(configuration.getLmsServiceHost()).append(configuration.getMultilevelBPEnrolEndPoint()).append(Constants.TWO_STEP_MDO_AND_PC_APPROVAL);
-					break;
-				case Constants.TWO_STEP_PC_AND_MDO_APPROVAL:
-					uri.append(configuration.getLmsServiceHost()).append(configuration.getMultilevelBPEnrolEndPoint()).append(Constants.TWO_STEP_PC_AND_MDO_APPROVAL);
-					break;
-				case Constants.AI_ASSESSMENT_SERVICE_NAME:
-					uri.append(configuration.getLmsServiceHost()).append(configuration.getLmsServiceConfigPath()).append(Constants.ONE_STEP_SPV_APPROVAL);
-					break;
-				default:
-					break;
+			WorkflowHelperUtil.appendBaseWorkflowConfigUri(configuration, uri, serviceName);
+			WorkflowHelperUtil.appendMultilevelEnrolConfigUri(configuration, uri, serviceName);
+			if (Constants.AI_ASSESSMENT_SERVICE_NAME.equals(serviceName)) {
+				uri = new StringBuilder(configuration.getLmsServiceHost()).append(configuration.getLmsServiceConfigPath()).append(Constants.ONE_STEP_SPV_APPROVAL);
 			}
-			wfConfig = (Map<String, Object>) requestServiceImpl.fetchResultUsingGet(uri);
-			Map<String, Object> result = (Map<String, Object>) wfConfig.get(Constants.RESULT);
-			Map<String, Object> response = (Map<String, Object>) result.get(Constants.RESPONSE);
-			Map<String,Object> wfStates = mapper.readValue((String) response.get(Constants.VALUE),Map.class);
-			return mapper.convertValue(wfStates, new TypeReference<WorkFlowModel>(){});
+			return WorkflowHelperUtil.fetchAndParseWorkFlowConfig(requestServiceImpl, mapper, uri);
 		} catch (Exception e) {
 			log.error("Exception occurred while getting work flow config details!");
 			throw new ApplicationException(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, e);
@@ -1004,29 +903,43 @@ public class WorkflowServiceImpl implements Workflowservice {
 		return response;
 	}
 
+	private record UserIdAndRootOrg(String userId, String rootOrgId) {
+	}
+
+	private UserIdAndRootOrg resolveUserAndRootOrgForBulkUpdate(String userAuthToken, SBApiResponse response,
+			String invalidTokenLogMsg, String userNotFoundErrorFormat) {
+		String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
+		if (!StringUtils.hasLength(userId)) {
+			setErrorData(response, INVALID_USER_TOKEN);
+			response.setResponseCode(HttpStatus.BAD_REQUEST);
+			log.error(invalidTokenLogMsg);
+			return null;
+		}
+		Map<String, Object> propertyMap = new HashMap<>();
+		propertyMap.put(Constants.ID, userId);
+		List<Map<String, Object>> userDetails = cassandraOperation.getRecordsByProperties(
+				Constants.KEYSPACE_SUNBIRD, Constants.USER_TABLE, propertyMap, Arrays.asList(Constants.ROOT_ORG_ID));
+
+		if (userDetails.isEmpty()) {
+			setErrorData(response, String.format(userNotFoundErrorFormat, userId));
+			log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
+			return null;
+		}
+		String rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
+		return new UserIdAndRootOrg(userId, rootOrgId);
+	}
+
 	public SBApiResponse getBulkUpdateStatus(String userAuthToken) {
 		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_USER_BULK_UPDATE_STATUS);
 		try {
-			String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
-			if (!StringUtils.hasLength(userId)) {
-				setErrorData(response, INVALID_USER_TOKEN);
-				response.setResponseCode(HttpStatus.BAD_REQUEST);
-				log.error("Failed to get uploaded file status. Error: Invalid user token");
+			UserIdAndRootOrg resolution = resolveUserAndRootOrgForBulkUpdate(userAuthToken, response,
+					"Failed to get uploaded file status. Error: Invalid user token",
+					"Failed to get uploaded file status. Error: User not found for Id: %s");
+			if (resolution == null) {
 				return response;
 			}
 			Map<String, Object> propertyMap = new HashMap<>();
-			propertyMap.put(Constants.ID, userId);
-			List<Map<String, Object>> userDetails = cassandraOperation.getRecordsByProperties(
-					Constants.KEYSPACE_SUNBIRD, Constants.USER_TABLE, propertyMap, Arrays.asList(Constants.ROOT_ORG_ID));
-			
-			if (userDetails.isEmpty()) {
-				setErrorData(response, String.format("Failed to get uploaded file status. Error: User not found for Id: %s", userId));
-				log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
-				return response;
-			}
-			String rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
-			propertyMap.clear();
-			propertyMap.put(Constants.ROOT_ORG_ID, rootOrgId);
+			propertyMap.put(Constants.ROOT_ORG_ID, resolution.rootOrgId());
 			List<Map<String, Object>> bulkUpdateDetails = cassandraOperation.getRecordsByProperties(
 					Constants.KEYSPACE_SUNBIRD,
 					Constants.TABLE_USER_BULK_UPDATE,
@@ -1047,25 +960,14 @@ public class WorkflowServiceImpl implements Workflowservice {
 	public SBApiResponse workflowBulkUpdateTransition(String userAuthToken, MultipartFile mFile) {
 		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_USER_BULK_UPDATE);
 		try {
-			String userId = accessTokenValidator.fetchUserIdFromAccessToken(userAuthToken);
-			if (!StringUtils.hasLength(userId)) {
-				setErrorData(response, INVALID_USER_TOKEN);
-				response.setResponseCode(HttpStatus.BAD_REQUEST);
-				log.error("Failed to process bulk update. Error: Invalid user token");
+			UserIdAndRootOrg resolution = resolveUserAndRootOrgForBulkUpdate(userAuthToken, response,
+					"Failed to process bulk update. Error: Invalid user token",
+					"Failed to upload file. Error: User not found for Id: %s");
+			if (resolution == null) {
 				return response;
 			}
-			Map<String, Object> propertyMap = new HashMap<>();
-			propertyMap.put(Constants.ID, userId);
-			List<Map<String, Object>> userDetails = cassandraOperation.getRecordsByProperties(
-					Constants.KEYSPACE_SUNBIRD, Constants.USER_TABLE, propertyMap, Arrays.asList(Constants.ROOT_ORG_ID));
-			
-			if (userDetails.isEmpty()) {
-				setErrorData(response, String.format("Failed to upload file. Error: User not found for Id: %s", userId));
-				log.error(RECORD_NOT_FOUND_LOG_PREFIX + Constants.USER_TABLE + Constants.DB_TABLE_NAME);
-				return response;
-			}
-
-			String rootOrgId = (String) userDetails.get(0).get(Constants.USER_ROOT_ORG_ID);
+			String userId = resolution.userId();
+			String rootOrgId = resolution.rootOrgId();
 
 			SBApiResponse uploadResponse = storageService.uploadFile(mFile, configuration.getUserBulkUpdateFolderName(), configuration.getWorkflowCloudContainerName());
 			if (!HttpStatus.OK.equals(uploadResponse.getResponseCode())) {
@@ -1648,38 +1550,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private Map<String, Object> isWFRequestExist(WfRequest wfRequest) throws IOException {
-
-		if (wfRequest == null || wfRequest.getUpdateFieldValues() == null || wfRequest.getUpdateFieldValues().isEmpty()) {
-			throw new IllegalArgumentException("Invalid WfRequest or updateFieldValues");
-		}
-
-		Map<String, Object> response = new HashMap<>();
-		String newRequestKey = ((Map<String, Object>) wfRequest.getUpdateFieldValues().get(0).get(Constants.TO_VALUE)).keySet().iterator().next();
-		List<WfStatusEntity> wfStatusEntities = wfStatusRepo.getPendingRequests(wfRequest.getUserId(), wfRequest.getServiceName(), Constants.SEND_FOR_APPROVAL);
-
-		for (WfStatusEntity wfStatusEntity : wfStatusEntities) {
-			String existingRequestKey = getKeyFromUpdateFieldValues(wfStatusEntity.getUpdateFieldValues());
-			if (org.apache.commons.lang3.StringUtils.isNotEmpty(existingRequestKey) && existingRequestKey.equalsIgnoreCase(newRequestKey)) {
-				response.put(Constants.IS_WF_REQUEST_EXIST, true);
-				response.put(Constants.WF_ID_CONSTANT, wfStatusEntity.getWfId());
-				return response;
-			}
-		}
-		response.put(Constants.IS_WF_REQUEST_EXIST, false);
-		response.put(Constants.WF_ID_CONSTANT, wfRequest.getWfId());
-		return response;
-	}
-
-	private String getKeyFromUpdateFieldValues(String updateFieldValues) throws IOException {
-		List<Map<String, Object>> updatedFieldValues = mapper.readValue(updateFieldValues, new TypeReference<List<Map<String, Object>>>() {
-		});
-		Map<String, Object> toValue = (Map<String, Object>) updatedFieldValues.get(0).get(Constants.TO_VALUE);
-
-		if (!MapUtils.isEmpty(toValue)) {
-			return toValue.keySet().iterator().next();
-		} else {
-			return null;
-		}
+		return WorkflowHelperUtil.isWFRequestExist(wfRequest, wfStatusRepo, mapper);
 	}
 
 	private boolean handleProfileServiceWorkflow(WfRequest wfRequest, Response response, Map<String, Object> data) {
@@ -1709,20 +1580,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private void addRequestTypeInProfileWF(WfRequest wfRequest){
-			String requestKey = ((Map<String, Object>) wfRequest.getUpdateFieldValues().get(0).get(Constants.TO_VALUE)).keySet().iterator().next();
-		switch (requestKey) {
-			case "group":
-				wfRequest.setRequestType("GROUP_CHANGE");
-				break;
-			case "designation":
-				wfRequest.setRequestType("DESIGNATION_CHANGE");
-				break;
-			case "name":
-				wfRequest.setRequestType("ORG_TRANSFER");
-				break;
-			default:
-				wfRequest.setRequestType(requestKey);
-		}
+		WorkflowHelperUtil.addRequestTypeInProfileWF(wfRequest);
 	}
 
 	public static Map<String, Object> buildUserSearchRequest(String userId) {
@@ -1867,29 +1725,7 @@ public class WorkflowServiceImpl implements Workflowservice {
 	}
 
 	private Map<String, Object> userProfileRead(String userId) {
-		log.info("WorkflowServiceImpl: userProfileRead for userId: {}", userId);
-		String url = configuration.getLmsServiceHost() +
-				configuration.getUserProfileReadEndPoint().replace(Constants.USER_ID_VALUE, userId);
-		Object response = requestServiceImpl.fetchResultUsingGet(new StringBuilder(url));
-		if (response == null) {
-			return Collections.emptyMap();
-		}
-		Map<String, Object> readResponse = mapper.convertValue(response, Map.class);
-		Object resultObj = readResponse.get(Constants.RESULT);
-		if (!(resultObj instanceof Map)) {
-			return Collections.emptyMap();
-		}
-		Map<String, Object> resultMap = (Map<String, Object>) resultObj;
-		if (MapUtils.isEmpty(resultMap)) {
-			log.error("User profile read response is empty for userId: {}", userId);
-			return Collections.emptyMap();
-		}
-		Object userResponseObj = resultMap.get(Constants.RESPONSE);
-		if (!(userResponseObj instanceof Map)) {
-			log.error("User profile read response is empty for userId: {}", userId);
-			return Collections.emptyMap();
-		}
-		return (Map<String, Object>) userResponseObj;
+		return userUtil.userProfileRead(userId);
 	}
 
 	public Response getAiAssessmentRequests(SearchCriteria criteria) {

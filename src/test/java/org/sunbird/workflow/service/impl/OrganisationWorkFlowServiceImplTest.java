@@ -71,8 +71,6 @@ class OrganisationWorkFlowServiceImplTest {
         Map<String, Object> field = Map.of(Constants.TO_VALUE, toValueMap);
         wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
 
-        when(service.isOrgDetailExists(eq(Constants.ORGANIZATION_NAME), anyString())).thenReturn(true);
-
         Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
 
         assertEquals(Constants.ORGANIZATION_EXIST_ERROR, response.get(Constants.ERROR_MESSAGE));

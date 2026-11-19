@@ -15,7 +15,10 @@ import org.sunbird.workflow.exception.ApplicationException;
 import org.sunbird.workflow.exception.BadRequestException;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
+import org.sunbird.workflow.producer.Producer;
 import org.sunbird.workflow.utils.AccessTokenValidator;
+import org.sunbird.workflow.utils.CassandraOperation;
+import org.sunbird.workflow.utils.NotificationTriggerService;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -36,6 +39,9 @@ class WorkFlowServiceImplV2Test {
     @Mock private RequestServiceImpl requestServiceImpl;
     @Mock private RedisCacheMgr redisCacheMgr;
     @Mock private AccessTokenValidator accessTokenValidator;
+    @Mock private CassandraOperation cassandraOperation;
+    @Mock private Producer producer;
+    @Mock private NotificationTriggerService notificationTriggerService;
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
@@ -107,6 +113,108 @@ class WorkFlowServiceImplV2Test {
     }
 
     @Test
+    void testWorkflowTransition_unauthorized_whenTokenInvalid() {
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("");
+
+        Response response = service.workflowTransition("root", "org", new HashMap<>(), "bad-token");
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getResponseCode());
+    }
+
+    @Test
+    void testWorkflowTransition_rawRequestNotAList_returnsBadRequest() {
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("requestUser1");
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, "not-a-list");
+
+        Response response = service.workflowTransition("root", "org", requestBody, "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.get(Constants.STATUS));
+        assertEquals("Invalid data type for workflow requests", response.get(Constants.MESSAGE));
+    }
+
+    @Test
+    void testWorkflowTransition_noServiceNameAmongRequests_returnsBadRequest() {
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("requestUser1");
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        // serviceName intentionally left null/empty on every request in the list
+        List<WfRequest> rawList = List.of(wfRequest);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, rawList);
+
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(rawList);
+
+        Response response = service.workflowTransition("root", "org", requestBody, "token");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.get(Constants.STATUS));
+        assertEquals("Invalid data type for workflow requests", response.get(Constants.MESSAGE));
+    }
+
+    @Test
+    void testWorkflowTransition_exceptionDuringProcessing_returnsInternalServerError() {
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("requestUser1");
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, List.of(new WfRequest()));
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenThrow(new RuntimeException("boom"));
+
+        Response response = service.workflowTransition("root", "org", requestBody, "token");
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.get(Constants.STATUS));
+        assertEquals("Failed to process workflow transition", response.get(Constants.MESSAGE));
+    }
+
+    @Test
+    void testWorkflowTransition_filtersOutRequestsWithNullUserId() throws Exception {
+        WfRequest withUser = new WfRequest();
+        withUser.setUserId("user1");
+        withUser.setServiceName("PROFILE_SERVICE");
+        withUser.setWfId("wf123");
+        withUser.setState("PENDING");
+        withUser.setAction("APPROVE");
+        withUser.setActorUserId("actor1");
+        withUser.setApplicationId("app1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put("group", "professionalDetails");
+        withUser.setUpdateFieldValues(List.of(updateField));
+
+        WfRequest withoutUser = new WfRequest();
+        withoutUser.setUserId(null);
+        withoutUser.setServiceName("PROFILE_SERVICE");
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, List.of(withUser, withoutUser));
+
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("requestUser1");
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), any(Class.class))).thenReturn(Map.of());
+
+        WfAction action1 = new WfAction();
+        action1.setAction("APPROVE");
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setState("PENDING");
+        wfStatus.setActions(List.of(action1));
+        WorkFlowModel model = new WorkFlowModel();
+        model.setWfstates(List.of(wfStatus));
+
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenAnswer(invocation -> {
+            TypeReference<?> typeRef = invocation.getArgument(1);
+            if (typeRef.getType().getTypeName().contains("List")) {
+                return List.of(withUser, withoutUser);
+            } else if (typeRef.getType().getTypeName().contains("WorkFlowModel")) {
+                return model;
+            }
+            return null;
+        });
+
+        Response response = service.workflowTransition("root", "org", requestBody, "test-auth-token");
+
+        assertNotNull(response);
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
     void testProcessAndUpdateProfessionalDetails() throws Exception {
         String userId = "user1";
         String json = """
@@ -122,6 +230,73 @@ class WorkFlowServiceImplV2Test {
         when(mapper.readTree(json)).thenReturn(node);
 
        assertDoesNotThrow(()-> service.processAndUpdateProfessionalDetails(userId, json));
+    }
+
+    @Test
+    void testProcessAndUpdateProfessionalDetails_missingGroupAndDesignation() throws Exception {
+        String userId = "user1";
+        String json = """
+            [
+              {
+                "fieldKey": "professionalDetails",
+                "toValue": { }
+              }
+            ]
+        """;
+
+        JsonNode node = new ObjectMapper().readTree(json);
+        when(mapper.readTree(json)).thenReturn(node);
+        when(redisCacheMgr.getContentFromCache(any())).thenReturn(null);
+
+        assertDoesNotThrow(() -> service.processAndUpdateProfessionalDetails(userId, json));
+    }
+
+    @Test
+    void testProcessAndUpdateProfessionalDetails_nonProfessionalDetailsKey_isSkipped() throws Exception {
+        String userId = "user1";
+        String json = """
+            [
+              { "fieldKey": "otherField", "toValue": { "group": "g1" } }
+            ]
+        """;
+
+        JsonNode node = new ObjectMapper().readTree(json);
+        when(mapper.readTree(json)).thenReturn(node);
+
+        assertDoesNotThrow(() -> service.processAndUpdateProfessionalDetails(userId, json));
+        verify(redisCacheMgr, never()).getContentFromCache(any());
+    }
+
+    @Test
+    void testProcessAndUpdateProfessionalDetails_mapperThrows_isSwallowed() throws Exception {
+        String userId = "user1";
+        String json = "invalid";
+        when(mapper.readTree(json)).thenThrow(new RuntimeException("parse error"));
+
+        assertDoesNotThrow(() -> service.processAndUpdateProfessionalDetails(userId, json));
+    }
+
+    @Test
+    void testUpdateProfessionalDetailsInCache_exceptionIsSwallowed() throws Exception {
+        when(redisCacheMgr.getContentFromCache(any())).thenReturn("not-valid-json-but-mapper-mocked");
+        when(mapper.readTree(anyString())).thenThrow(new RuntimeException("boom"));
+
+        assertDoesNotThrow(() -> service.updateProfessionalDetailsInCache("user1", "g", "d"));
+    }
+
+    @Test
+    void testUpdateProfessionalDetailsInCache_profileNodeMissingProfessionalDetails() throws Exception {
+        String userId = "user1";
+        String cachedData = "{ \"otherField\": \"x\" }";
+        when(redisCacheMgr.getContentFromCache(any())).thenReturn(cachedData);
+        ObjectNode node = (ObjectNode) new ObjectMapper().readTree(cachedData);
+        when(mapper.readTree(cachedData)).thenReturn(node);
+        when(configuration.getBasicProfileCacheTtl()).thenReturn(600);
+        when(mapper.writeValueAsString(any())).thenReturn(cachedData);
+
+        assertDoesNotThrow(() -> service.updateProfessionalDetailsInCache(userId, "g", "d"));
+
+        verify(redisCacheMgr).putInBasicProfileCache(any(), any(), anyInt());
     }
 
     @Test

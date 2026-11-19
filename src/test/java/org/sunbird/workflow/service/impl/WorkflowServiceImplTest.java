@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -78,6 +79,8 @@ class WorkflowServiceImplTest {
     private ElasticsearchServiceManager eServiceManager;
     @Mock
     private NotificationTriggerService notificationTriggerService;
+    @Mock
+    private UserUtil userUtil;
 
     private SearchCriteriaV2 criteriaV2;
     @Mock
@@ -98,10 +101,10 @@ class WorkflowServiceImplTest {
     void setUp() {
         workflowServiceImpl = new WorkflowServiceImpl(wfStatusRepo, wfAuditRepo, mapper, configuration,
                 userProfileWfService, requestServiceImpl, producer, cassandraOperation, accessTokenValidator,
-                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService);
+                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService, userUtil);
         spyWorkflowServiceImpl = Mockito.spy(new WorkflowServiceImpl(wfStatusRepo, wfAuditRepo, mapper, configuration,
                 userProfileWfService, requestServiceImpl, producer, cassandraOperation, accessTokenValidator,
-                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService));
+                localCache, storageService, kafkaProducer, eServiceManager, notificationTriggerService, userUtil));
     }
 
     @Test
@@ -304,7 +307,6 @@ class WorkflowServiceImplTest {
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
         when(configuration.getWorkFlowNotificationTopic()).thenReturn("topic1");
         when(configuration.getWorkflowApplicationTopic()).thenReturn("topic2");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("endpoint/${userId}");
 
         // mock WfStatusEntity
         WfStatusEntity wfStatusEntity = new WfStatusEntity();
@@ -353,15 +355,12 @@ class WorkflowServiceImplTest {
 
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(Map.of("responseCode", "OK"));
 
+        lenient().when(configuration.getModificationRecordAllowActions()).thenReturn("CREATE,UPDATE,DELETE");
 
-        String allowedActions = "CREATE,UPDATE,DELETE";
-
-        // mock configuration to return allowedActions
-        Mockito.when(configuration.getModificationRecordAllowActions()).thenReturn(allowedActions);
         Map<String, Object> fakeMap = new HashMap<>();
         fakeMap.put("result", "this-is-a-string-not-a-map"); // not a Map, will trigger the condition
 
-        when(mapper.convertValue(any(), eq(Map.class))).thenReturn(fakeMap);
+        lenient().when(mapper.convertValue(any(), eq(Map.class))).thenReturn(fakeMap);
         // Act
         Response response = workflowServiceImpl.workflowTransition(rootOrg, org, wfRequest, userId, role);
 
@@ -398,7 +397,6 @@ class WorkflowServiceImplTest {
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
         when(configuration.getWorkFlowNotificationTopic()).thenReturn("topic1");
         when(configuration.getWorkflowApplicationTopic()).thenReturn("topic2");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("endpoint/${userId}");
 
         // mock WfStatusEntity
         WfStatusEntity wfStatusEntity = new WfStatusEntity();
@@ -447,15 +445,12 @@ class WorkflowServiceImplTest {
 
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(Map.of("responseCode", "OK"));
 
+        lenient().when(configuration.getModificationRecordAllowActions()).thenReturn("CREATE,UPDATE,DELETE");
 
-        String allowedActions = "CREATE,UPDATE,DELETE";
-
-        // mock configuration to return allowedActions
-        Mockito.when(configuration.getModificationRecordAllowActions()).thenReturn(allowedActions);
         Map<String, Object> fakeMap = new HashMap<>();
         fakeMap.put("result", "this-is-a-string-not-a-map"); // not a Map, will trigger the condition
 
-        when(mapper.convertValue(any(), eq(Map.class))).thenReturn(fakeMap);
+        lenient().when(mapper.convertValue(any(), eq(Map.class))).thenReturn(fakeMap);
         // Act
         Response response = workflowServiceImpl.workflowTransition(rootOrg, org, wfRequest, userId, role);
 
@@ -1615,6 +1610,7 @@ class WorkflowServiceImplTest {
                 Constants.ONE_STEP_MDO_APPROVAL,
                 Constants.TWO_STEP_MDO_AND_PC_APPROVAL,
                 Constants.TWO_STEP_PC_AND_MDO_APPROVAL,
+                Constants.AI_ASSESSMENT_SERVICE_NAME,
                 "UNKNOWN_SERVICE"
         };
 
@@ -1975,6 +1971,10 @@ class WorkflowServiceImplTest {
             case Constants.BLENDED_PROGRAM_SERVICE_NAME:
                 when(configuration.getBlendedProgramServicePath()).thenReturn("/blended/config");
                 break;
+            case Constants.AI_ASSESSMENT_SERVICE_NAME:
+                when(configuration.getLmsServiceHost()).thenReturn("http://lms/");
+                when(configuration.getLmsServiceConfigPath()).thenReturn("/aiAssessment/config");
+                break;
             case Constants.ONE_STEP_PC_APPROVAL,
                  Constants.ONE_STEP_MDO_APPROVAL,
                  Constants.TWO_STEP_MDO_AND_PC_APPROVAL,
@@ -2031,5 +2031,928 @@ class WorkflowServiceImplTest {
         profile.put("userInfo", Map.of("first_name", "John"));
         profile.put("wfInfo", mockWfList("app1", "u1"));
         return List.of(profile);
+    }
+
+    // ===================== Second coverage wave: additional tests =====================
+
+    @Test
+    void testWorkflowTransition_multipleWfCreationEnabled_blendedProgram_loopsOverFields() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId(null);
+        wfRequest.setApplicationId("appIdBlended");
+        wfRequest.setActorUserId("actorBlended");
+        wfRequest.setUserId("userBlended");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+        wfRequest.setState("PENDING");
+
+        HashMap<String, Object> field1 = new HashMap<>();
+        field1.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val1")));
+        HashMap<String, Object> field2 = new HashMap<>();
+        field2.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val2")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field1, field2)));
+
+        when(configuration.getMultipleWfCreationEnable()).thenReturn(true);
+
+        WfStatusEntity applicationStatus = new WfStatusEntity();
+        applicationStatus.setServiceName("actualService");
+        applicationStatus.setCurrentStatus("PENDING");
+        applicationStatus.setCreatedOn(new Date());
+        WfStatusEntity applicationStatus2 = new WfStatusEntity();
+        applicationStatus2.setServiceName("actualService");
+        applicationStatus2.setCurrentStatus("PENDING");
+        applicationStatus2.setCreatedOn(new Date());
+        // Each field in the loop is processed as an independent application, so the repo lookup
+        // must hand back a fresh (still-PENDING) entity per field rather than the same mutated
+        // instance, otherwise the second field sees the first field's already-APPROVED status.
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any()))
+                .thenReturn(applicationStatus, applicationStatus2);
+
+        WfStatus pendingStatus = new WfStatus();
+        pendingStatus.setState("PENDING");
+        pendingStatus.setStartState(true);
+        pendingStatus.setIsLastState(false);
+        WfAction approveAction = new WfAction();
+        approveAction.setAction("APPROVE");
+        approveAction.setNextState("APPROVED");
+        pendingStatus.setActions(List.of(approveAction));
+
+        WfStatus approvedStatus = new WfStatus();
+        approvedStatus.setState("APPROVED");
+        approvedStatus.setIsLastState(true);
+
+        WorkFlowModel wfModel = new WorkFlowModel();
+        wfModel.setWfstates(List.of(pendingStatus, approvedStatus));
+        doReturn(wfModel).when(spyWorkflowServiceImpl).getWorkFlowConfig("actualService");
+
+        when(configuration.getModificationRecordAllowActions()).thenReturn("");
+        when(mapper.writeValueAsString(any())).thenReturn("{}");
+        when(wfStatusRepo.save(any())).thenReturn(applicationStatus);
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), isNull())).thenReturn(null);
+
+        Response response = spyWorkflowServiceImpl.workflowTransition("rootOrg", "org", wfRequest, "userBlended", "role");
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        verify(wfStatusRepo, times(2)).save(any());
+    }
+
+    @Test
+    void testWorkflowTransition_profileService_wfRequestAlreadyExists_aborts() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId(null);
+        wfRequest.setUserId("user3");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.GROUP, "eng")));
+        wfRequest.setUpdateFieldValues(List.of(field));
+
+        when(configuration.getMultipleWfCreationEnable()).thenReturn(false);
+
+        WfStatusEntity existingPending = new WfStatusEntity();
+        existingPending.setWfId("existingWfId");
+        existingPending.setUpdateFieldValues("[{\"toValue\":{\"group\":\"eng\"}}]");
+        when(wfStatusRepo.getPendingRequests(eq("user3"), eq(Constants.PROFILE_SERVICE_NAME), eq(Constants.SEND_FOR_APPROVAL)))
+                .thenReturn(List.of(existingPending));
+        when(mapper.readValue(eq(existingPending.getUpdateFieldValues()), any(TypeReference.class)))
+                .thenReturn(List.of(Map.of(Constants.TO_VALUE, Map.of(Constants.GROUP, "eng"))));
+
+        Response response = workflowServiceImpl.workflowTransition("rootOrg", "org", wfRequest, "user3", "role3");
+
+        assertEquals(Constants.STATUS_CHANGE_MESSAGE + Constants.SEND_FOR_APPROVAL, response.get(Constants.MESSAGE));
+    }
+
+    @Test
+    void testWorkflowTransition_threeArgOverload_delegatesToFiveArg() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId(null);
+        wfRequest.setUserId("user4");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.GROUP, "eng")));
+        wfRequest.setUpdateFieldValues(List.of(field));
+
+        when(configuration.getMultipleWfCreationEnable()).thenReturn(false);
+        WfStatusEntity existingPending = new WfStatusEntity();
+        existingPending.setWfId("existingWfId4");
+        existingPending.setUpdateFieldValues("[{\"toValue\":{\"group\":\"eng\"}}]");
+        when(wfStatusRepo.getPendingRequests(any(), any(), any())).thenReturn(List.of(existingPending));
+        when(mapper.readValue(eq(existingPending.getUpdateFieldValues()), any(TypeReference.class)))
+                .thenReturn(List.of(Map.of(Constants.TO_VALUE, Map.of(Constants.GROUP, "eng"))));
+
+        Response response = workflowServiceImpl.workflowTransition("rootOrg", "org", wfRequest);
+
+        assertNotNull(response);
+    }
+
+    @Test
+    void testChangeStatus_newApplication_aiAssessmentPending_communityModeratorOrgTransfer() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setState("INITIAL");
+        wfRequest.setApplicationId("appId2");
+        wfRequest.setActorUserId("actor2");
+        wfRequest.setUserId("user2");
+        wfRequest.setAction("SUBMIT");
+        wfRequest.setServiceName(Constants.AI_ASSESSMENT_SERVICE_NAME);
+        wfRequest.setRequestType(Constants.ORG_TRANSFER_REQUEST);
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field)));
+        wfRequest.setWfId(null);
+
+        when(configuration.getMultipleWfCreationEnable()).thenReturn(false);
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+
+        WfStatus initialStatus = new WfStatus();
+        initialStatus.setState("INITIAL");
+        initialStatus.setStartState(true);
+        initialStatus.setIsLastState(false);
+        WfAction submitAction = new WfAction();
+        submitAction.setAction("SUBMIT");
+        submitAction.setNextState("PENDING");
+        initialStatus.setActions(List.of(submitAction));
+
+        WfStatus pendingStatus = new WfStatus();
+        pendingStatus.setState("PENDING");
+        pendingStatus.setIsLastState(false);
+
+        WorkFlowModel wfModel = new WorkFlowModel();
+        wfModel.setWfstates(List.of(initialStatus, pendingStatus));
+        doReturn(wfModel).when(spyWorkflowServiceImpl).getWorkFlowConfig(Constants.AI_ASSESSMENT_SERVICE_NAME);
+
+        when(configuration.getModificationRecordAllowActions()).thenReturn("");
+        when(mapper.writeValueAsString(any())).thenReturn("{}");
+
+        WfStatusEntity savedEntity = new WfStatusEntity();
+        savedEntity.setUserId("user2");
+        savedEntity.setRequestType(Constants.ORG_TRANSFER_REQUEST);
+        when(wfStatusRepo.save(any())).thenReturn(savedEntity);
+        when(wfStatusRepo.findByUserIdAndCurrentStatus(any(), any(), anyBoolean())).thenReturn(new ArrayList<>());
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+
+        Map<String, Object> communityModeratorResponse = Map.of(
+                Constants.RESPONSE_CODE, "OK",
+                "result", Map.of(
+                        "response", Map.of(
+                                "content", List.of(
+                                        Map.of("organisations", List.of(
+                                                Map.of("roles", List.of("COMMUNITY_MODERATOR"))
+                                        ))
+                                )
+                        )
+                )
+        );
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), isNull()))
+                .thenReturn(communityModeratorResponse);
+
+        Response response = spyWorkflowServiceImpl.workflowTransition("rootOrg", "org", wfRequest, "user2", "role2");
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        verify(producer, atLeastOnce()).push(any(), any());
+    }
+
+    @Test
+    void testWorkflowTransition_changeStatusThrowsIOException_wrapsInApplicationException() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId(null);
+        wfRequest.setApplicationId("appIdIO");
+        wfRequest.setActorUserId("actorIO");
+        wfRequest.setUserId("userIO");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName("genericService");
+        wfRequest.setState("PENDING");
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field)));
+
+        when(configuration.getMultipleWfCreationEnable()).thenReturn(false);
+
+        WfStatusEntity applicationStatus = new WfStatusEntity();
+        applicationStatus.setCurrentStatus("PENDING");
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any()))
+                .thenReturn(applicationStatus);
+
+        WfStatus pendingStatus = new WfStatus();
+        pendingStatus.setState("PENDING");
+        pendingStatus.setStartState(true);
+        pendingStatus.setIsLastState(false);
+        WfAction approveAction = new WfAction();
+        approveAction.setAction("APPROVE");
+        approveAction.setNextState("APPROVED");
+        pendingStatus.setActions(List.of(approveAction));
+
+        WfStatus approvedStatus = new WfStatus();
+        approvedStatus.setState("APPROVED");
+        approvedStatus.setIsLastState(true);
+
+        WorkFlowModel wfModel = new WorkFlowModel();
+        wfModel.setWfstates(List.of(pendingStatus, approvedStatus));
+        doReturn(wfModel).when(spyWorkflowServiceImpl).getWorkFlowConfig("genericService");
+
+        when(mapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("boom") {
+        });
+
+        ApplicationException ex = assertThrows(ApplicationException.class,
+                () -> spyWorkflowServiceImpl.workflowTransition("rootOrg", "org", wfRequest, "userIO", "role"));
+
+        assertEquals(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, ex.getMessage());
+    }
+
+    @Test
+    void testGetUserWFApplicationFieldsV2_withApplicationStatus_populatesResultList() throws Exception {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("service1");
+        criteria.setApplicationStatus("PENDING");
+
+        Object[] row = new Object[]{"json1", "wfId1", "comment1", "lastUpdated1", "PENDING"};
+        when(wfStatusRepo.findWfFieldsForUserV2(eq("service1"), eq("PENDING"), eq("wid1")))
+                .thenReturn(Collections.singletonList(row));
+
+        List<HashMap<String, Object>> parsedValues = List.of(
+                new HashMap<>(Map.of(Constants.TO_VALUE, new HashMap<>(Map.of("field1", "value1")))));
+        when(mapper.readValue(eq("json1"), any(TypeReference.class))).thenReturn(parsedValues);
+
+        Response response = workflowServiceImpl.getUserWFApplicationFieldsV2("rootOrg", "org", "wid1", criteria);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        List<Map<String, Object>> result = (List<Map<String, Object>>) response.get(Constants.DATA);
+        assertEquals(1, result.size());
+        assertEquals("wfId1", result.get(0).get("wfId"));
+        assertEquals("value1", result.get(0).get("field1"));
+    }
+
+    @Test
+    void testGetUserWFApplicationFieldsV2_exceptionDuringParsing_setsErrorResponse() throws Exception {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("service1");
+
+        Object[] row = new Object[]{"badjson", "wfId1", "comment1", "lastUpdated1", "PENDING"};
+        when(wfStatusRepo.findWfFieldsForUserV2(eq("service1"), eq("wid1"))).thenReturn(Collections.singletonList(row));
+        when(mapper.readValue(eq("badjson"), any(TypeReference.class))).thenThrow(new RuntimeException("bad json"));
+
+        Response response = workflowServiceImpl.getUserWFApplicationFieldsV2("rootOrg", "org", "wid1", criteria);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.get(Constants.STATUS));
+        assertEquals(Collections.emptyList(), response.get(Constants.DATA));
+    }
+
+    @Test
+    void testGetPageReqForApplicationSearch_limitExceedsMax_cappedToMaxLimit() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setLimit(500);
+        criteria.setOffset(5);
+        when(configuration.getMaxLimit()).thenReturn(100);
+
+        Pageable pageable = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "getPageReqForApplicationSearch", criteria);
+
+        assertEquals(100, pageable.getPageSize());
+    }
+
+    @Test
+    void testApplicationSearchOnApplicationIdGroup_withDept_searchDisabled_directQuery() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        criteria.setApplicationIds(List.of("app1"));
+        criteria.setApplicationStatus("APPROVED");
+        criteria.setDeptName("dept1");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+        when(wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNameAndApplicationIdIn(any(), any(), any(), any()))
+                .thenReturn(mockWfList("app1", "u1"));
+
+        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup(criteria);
+
+        assertNotNull(response);
+        verify(wfStatusRepo).findByServiceNameAndCurrentStatusAndDeptNameAndApplicationIdIn(any(), any(), any(), any());
+    }
+
+    @Test
+    void testApplicationSearchOnApplicationIdGroup_withDept_searchEnabled_notBlended_usesPagination() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        criteria.setApplicationIds(List.of("app1"));
+        criteria.setApplicationStatus("APPROVED");
+        criteria.setDeptName("dept1");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+        Page<WfStatusEntity> page = new PageImpl<>(mockWfList("app1", "u1"));
+        when(wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptNamePaginatedList(any(), any(), any(), any()))
+                .thenReturn(page);
+
+        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup(criteria, true);
+
+        assertNotNull(response);
+    }
+
+    @Test
+    void testApplicationSearchOnApplicationIdGroup_emptyApplicationIds_fetchesDistinctIds() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        criteria.setApplicationIds(Collections.emptyList());
+        criteria.setApplicationStatus("APPROVED");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+        Page<String> idsPage = new PageImpl<>(List.of("app1"));
+        when(wfStatusRepo.getListOfDistinctApplicationUsingDept(any(), any(), any(), any())).thenReturn(idsPage);
+        when(wfStatusRepo.findByServiceNameAndCurrentStatusAndApplicationIdIn(any(), any(), any()))
+                .thenReturn(mockWfList("app1", "u1"));
+
+        Response response = workflowServiceImpl.applicationSearchOnApplicationIdGroup(criteria);
+
+        assertNotNull(response);
+        assertEquals(1L, response.get(Constants.COUNT));
+    }
+
+    @Test
+    void testBuildInfosMap_blendedWithUserId_filtersToMatchedUser() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+        criteria.setUserId("u1");
+
+        WfStatusEntity e1 = new WfStatusEntity();
+        e1.setUserId("u1");
+        e1.setApplicationId("app1");
+        WfStatusEntity e2 = new WfStatusEntity();
+        e2.setUserId("u2");
+        e2.setApplicationId("app2");
+
+        Map<String, List<WfStatusEntity>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "buildInfosMap", criteria, List.of(e1, e2));
+
+        assertEquals(1, result.size());
+        assertTrue(result.containsKey("u1"));
+    }
+
+    @Test
+    void testGetDepartmentDetails_returnsDepartmentName() {
+        HashMap<String, Object> updatedDeptValue = new HashMap<>();
+        HashMap<String, String> toValue = new HashMap<>();
+        toValue.put("departmentName", "Engineering");
+        updatedDeptValue.put(Constants.TO_VALUE, toValue);
+
+        String result = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "getDepartmentDetails", updatedDeptValue);
+
+        assertEquals("Engineering", result);
+    }
+
+    @Test
+    void testStatusCountOnApplicationId_cacheMiss_buildsFromRepo() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setApplicationIds(List.of("app1"));
+
+        when(localCache.get("app1")).thenReturn(null);
+        Object[] row = new Object[]{"PENDING", 5L};
+        when(wfStatusRepo.findStatusCountByApplicationId(List.of("app1"))).thenReturn(Collections.singletonList(row));
+
+        Response response = workflowServiceImpl.statusCountOnApplicationId(criteria);
+
+        List<WfStatusCountDTO> data = (List<WfStatusCountDTO>) response.get(Constants.DATA);
+        assertEquals(1, data.size());
+        assertEquals("PENDING", data.get(0).getCurrentStatus());
+        assertEquals(5L, data.get(0).getStatusCount());
+        verify(localCache).put(eq("app1"), any());
+    }
+
+    @Test
+    void testIsRootOrgRequiredButMissing_variousScenarios() {
+        SearchCriteria groupCriteria = new SearchCriteria();
+        groupCriteria.setRequestType(List.of(Constants.GROUP_CHANGE));
+
+        boolean result1 = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "isRootOrgRequiredButMissing", "", groupCriteria);
+        assertTrue(result1);
+
+        boolean result2 = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "isRootOrgRequiredButMissing", "rootOrg1", groupCriteria);
+        assertFalse(result2);
+
+        SearchCriteria otherCriteria = new SearchCriteria();
+        otherCriteria.setRequestType(List.of("OTHER"));
+        boolean result3 = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "isRootOrgRequiredButMissing", "", otherCriteria);
+        assertFalse(result3);
+    }
+
+    @Test
+    void testResolveApplicationIdsFromDb_orgTransferRequestType() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setApplicationStatus("PENDING");
+        criteria.setDeptName("dept1");
+        criteria.setRequestType(List.of(Constants.ORG_TRANSFER_REQUEST));
+
+        Pageable pageable = PageRequest.of(0, 10);
+        when(wfStatusRepo.getCountOfDistinctUserIdsUsingServiceAndRequestTypeAndStatus(any(), any(), any(), any()))
+                .thenReturn(5L);
+        Page<String> page = new PageImpl<>(List.of("u1"));
+        when(wfStatusRepo.getListOfDistinctUserIdsUsingRequestType(any(), any(), any(), any(), any()))
+                .thenReturn(page);
+
+        Map.Entry<List<String>, Long> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "resolveApplicationIdsFromDb", criteria, pageable);
+
+        assertEquals(5L, result.getValue());
+        assertEquals(List.of("u1"), result.getKey());
+    }
+
+    @Test
+    void testResolveApplicationIdsFromDb_nonOrgTransferRequestType() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setApplicationStatus("PENDING");
+        criteria.setDeptName("dept1");
+        criteria.setRequestType(List.of(Constants.GROUP_CHANGE));
+
+        Pageable pageable = PageRequest.of(0, 10);
+        when(wfStatusRepo.getCountOfDistinctUserIdForProfileApproval(any(), any(), any(), any(), any()))
+                .thenReturn(3L);
+        Page<String> page = new PageImpl<>(List.of("u2"));
+        when(wfStatusRepo.getListOfDistinctUserIdsUsingRequestTypeForProfileApproval(any(), any(), any(), any(), any(), any()))
+                .thenReturn(page);
+
+        Map.Entry<List<String>, Long> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "resolveApplicationIdsFromDb", criteria, pageable);
+
+        assertEquals(3L, result.getValue());
+        assertEquals(List.of("u2"), result.getKey());
+    }
+
+    @Test
+    void testBuildEsUserProfilesSortedBySearchScore_sortsDescendingByScore() {
+        WfStatusEntity e1 = new WfStatusEntity();
+        e1.setApplicationId("app1");
+        WfStatusEntity e2 = new WfStatusEntity();
+        e2.setApplicationId("app2");
+
+        Map<String, Object> userInfoMap = new HashMap<>();
+        userInfoMap.put("app1", Map.of(Constants.SEARCH_SCORE, 1.0f));
+        userInfoMap.put("app2", Map.of(Constants.SEARCH_SCORE, 5.0f));
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "buildEsUserProfilesSortedBySearchScore", List.of(e1, e2), userInfoMap);
+
+        assertEquals(2, result.size());
+        Map<String, Object> firstUserInfo = (Map<String, Object>) result.get(0).get(Constants.USER_INFO);
+        assertEquals(5.0f, (float) firstUserInfo.get(Constants.SEARCH_SCORE));
+    }
+
+    @Test
+    void testSortDataByCriteria_byFirstNameAscending() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setSortBy(new HashMap<>(Map.of("first_name", "asc")));
+
+        Map<String, Object> entryA = new HashMap<>();
+        entryA.put("userInfo", Map.of("first_name", "Bob"));
+        Map<String, Object> entryB = new HashMap<>();
+        entryB.put("userInfo", Map.of("first_name", "Alice"));
+
+        List<Map<String, Object>> data = new ArrayList<>(List.of(entryA, entryB));
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "sortDataByCriteria", data, criteria);
+
+        Map<String, Object> firstUserInfo = (Map<String, Object>) result.get(0).get("userInfo");
+        assertEquals("Alice", firstUserInfo.get("first_name"));
+    }
+
+    @Test
+    void testSortDataByCriteria_byCreatedOnDescending() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setSortBy(new HashMap<>(Map.of("createdOn", "desc")));
+
+        WfStatusEntity older = new WfStatusEntity();
+        older.setCreatedOn(new Date(1000));
+        WfStatusEntity newer = new WfStatusEntity();
+        newer.setCreatedOn(new Date(2000));
+
+        Map<String, Object> entryOld = new HashMap<>();
+        entryOld.put(Constants.WF_INFO, List.of(older));
+        Map<String, Object> entryNew = new HashMap<>();
+        entryNew.put(Constants.WF_INFO, List.of(newer));
+
+        List<Map<String, Object>> data = new ArrayList<>(List.of(entryOld, entryNew));
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "sortDataByCriteria", data, criteria);
+
+        List<WfStatusEntity> firstWfInfo = (List<WfStatusEntity>) result.get(0).get(Constants.WF_INFO);
+        assertEquals(newer.getCreatedOn(), firstWfInfo.get(0).getCreatedOn());
+    }
+
+    @Test
+    void testSortDataByCriteria_unsupportedField_throwsIllegalArgumentException() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setSortBy(new HashMap<>(Map.of("unsupportedField", "asc")));
+
+        List<Map<String, Object>> data = new ArrayList<>(List.of(new HashMap<>()));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                ReflectionTestUtils.invokeMethod(workflowServiceImpl, "sortDataByCriteria", data, criteria));
+    }
+
+    @Test
+    void testMarkOrgTransferIfNameChanged_nameFieldChanged_marksTrue() throws Exception {
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setUpdateFieldValues("[{\"toValue\":{\"name\":\"newOrg\"}}, {\"other\":\"skip\"}]");
+
+        TypeReference<List<Map<String, Object>>> typeRef = new TypeReference<>() {
+        };
+        when(mapper.readValue(eq(entity.getUpdateFieldValues()), any(TypeReference.class)))
+                .thenReturn(List.of(
+                        Map.of(Constants.TO_VALUE, Map.of("name", "newOrg")),
+                        new HashMap<>()));
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "markOrgTransferIfNameChanged", entity, typeRef);
+
+        assertTrue(entity.isOrgTansferRequest());
+    }
+
+    @Test
+    void testAddPendingRequestIfApplicable_variousBranches() {
+        Map<String, Object> allPendingRequest = new HashMap<>();
+        Set<String> userIdSet = new HashSet<>();
+
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setUserId("u1");
+
+        Map<String, Object> noToValue = new HashMap<>();
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "addPendingRequestIfApplicable", entity, noToValue, allPendingRequest, userIdSet);
+        assertTrue(allPendingRequest.isEmpty());
+
+        Map<String, Object> irrelevantKey = new HashMap<>();
+        irrelevantKey.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val")));
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "addPendingRequestIfApplicable", entity, irrelevantKey, allPendingRequest, userIdSet);
+        assertTrue(allPendingRequest.isEmpty());
+
+        Map<String, Object> groupValue = new HashMap<>();
+        groupValue.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.GROUP, "eng")));
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "addPendingRequestIfApplicable", entity, groupValue, allPendingRequest, userIdSet);
+        assertEquals(1, ((List<?>) allPendingRequest.get("u1")).size());
+        assertTrue(userIdSet.contains("u1"));
+
+        Map<String, Object> designationValue = new HashMap<>();
+        designationValue.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.DESIGNATION, "lead")));
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "addPendingRequestIfApplicable", entity, designationValue, allPendingRequest, userIdSet);
+        assertEquals(2, ((List<?>) allPendingRequest.get("u1")).size());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_nullResponse_returnsEarly() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", null, false, allUserDetails);
+        assertTrue(allUserDetails.isEmpty());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_responseCodeNotOk_returnsEarly() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "FAILED");
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, false, allUserDetails);
+        assertTrue(allUserDetails.isEmpty());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_emptyContent_returnsEarly() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "OK");
+        resp.put(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(Constants.CONTENT, Collections.emptyList())));
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, false, allUserDetails);
+        assertTrue(allUserDetails.isEmpty());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_mdoSearch_populatesMdoDetails() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> content = new HashMap<>();
+        content.put(Constants.USER_ID, "mdoUser1");
+        content.put(Constants.ROOT_ORG_ID, "rootOrg1");
+        content.put(Constants.ROOT_ORG_NAME, "deptX");
+
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "OK");
+        resp.put(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(Constants.CONTENT, List.of(content))));
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, true, allUserDetails);
+
+        assertTrue(allUserDetails.containsKey("mdoUser1"));
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_personalSearch_emptyProfileDetails_skips() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> content = new HashMap<>();
+        content.put(Constants.USER_ID, "user1");
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "OK");
+        resp.put(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(Constants.CONTENT, List.of(content))));
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, false, allUserDetails);
+
+        assertTrue(allUserDetails.isEmpty());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_personalSearch_emptyPersonalDetails_skips() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> content = new HashMap<>();
+        content.put(Constants.USER_ID, "user1");
+        content.put(Constants.PROFILE_DETAILS, new HashMap<>());
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "OK");
+        resp.put(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(Constants.CONTENT, List.of(content))));
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, false, allUserDetails);
+
+        assertTrue(allUserDetails.isEmpty());
+    }
+
+    @Test
+    void testPopulateUserSearchDetails_personalSearch_populatesPersonalDetails() {
+        Map<String, Object> allUserDetails = new HashMap<>();
+        Map<String, Object> personal = new HashMap<>();
+        personal.put(Constants.FIRSTNAME, "Jane");
+        personal.put(Constants.MOBILE, "9999999999");
+        personal.put(Constants.PRIMARY_EMAIL, "jane@x.com");
+        Map<String, Object> profile = new HashMap<>();
+        profile.put(Constants.PERSONAL_DETAILS, personal);
+        Map<String, Object> content = new HashMap<>();
+        content.put(Constants.USER_ID, "user1");
+        content.put(Constants.PROFILE_DETAILS, profile);
+
+        Map<String, Object> resp = new HashMap<>();
+        resp.put(Constants.RESPONSE_CODE, "OK");
+        resp.put(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(Constants.CONTENT, List.of(content))));
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "populateUserSearchDetails", resp, false, allUserDetails);
+
+        Map<String, Object> userPersonalInfo = (Map<String, Object>) allUserDetails.get("user1");
+        assertEquals("Jane", userPersonalInfo.get(Constants.FIRSTNAME));
+    }
+
+    @Test
+    void testExtractMdoLeaderUserIds_variousShapes() {
+        assertTrue(((List<?>) ReflectionTestUtils.invokeMethod(workflowServiceImpl, "extractMdoLeaderUserIds", "not a map")).isEmpty());
+        assertTrue(((List<?>) ReflectionTestUtils.invokeMethod(workflowServiceImpl, "extractMdoLeaderUserIds", Map.of("result", "not a map"))).isEmpty());
+        assertTrue(((List<?>) ReflectionTestUtils.invokeMethod(workflowServiceImpl, "extractMdoLeaderUserIds", Map.of("result", Map.of("response", "not a map")))).isEmpty());
+        assertTrue(((List<?>) ReflectionTestUtils.invokeMethod(workflowServiceImpl, "extractMdoLeaderUserIds", Map.of("result", Map.of("response", Map.of("content", "not a list"))))).isEmpty());
+
+        Object validResponse = Map.of("result", Map.of("response", Map.of("content",
+                List.of(Map.of("userId", "u1"), "notAMap"))));
+        List<?> result = (List<?>) ReflectionTestUtils.invokeMethod(workflowServiceImpl, "extractMdoLeaderUserIds", validResponse);
+        assertEquals(1, result.size());
+        assertEquals("u1", result.get(0));
+    }
+
+    @Test
+    void testHasCommunityModeratorRole_contentNull_returnsFalse() {
+        Map<String, Object> responseMap = Map.of("result", Map.of("response", new HashMap<String, Object>()));
+        boolean result = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "hasCommunityModeratorRole", responseMap);
+        assertFalse(result);
+    }
+
+    @Test
+    void testHasCommunityModeratorRole_organisationsNull_returnsFalse() {
+        Map<String, Object> responseMap = Map.of("result", Map.of("response", Map.of("content", List.of(new HashMap<String, Object>()))));
+        boolean result = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "hasCommunityModeratorRole", responseMap);
+        assertFalse(result);
+    }
+
+    @Test
+    void testHasCommunityModeratorRole_noMatchingRole_returnsFalse() {
+        Map<String, Object> responseMap = Map.of("result", Map.of("response", Map.of("content",
+                List.of(Map.of("organisations", List.of(Map.of("roles", List.of("OTHER_ROLE"))))))));
+        boolean result = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "hasCommunityModeratorRole", responseMap);
+        assertFalse(result);
+    }
+
+    @Test
+    void testHasCommunityModeratorRole_classCastException_returnsFalse() {
+        Map<String, Object> responseMap = Map.of("result", "not a map");
+        boolean result = ReflectionTestUtils.invokeMethod(workflowServiceImpl, "hasCommunityModeratorRole", responseMap);
+        assertFalse(result);
+    }
+
+    @Test
+    void testSendNotification_name_rejectAction_triggersTransferUpdate() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        wfRequest.setAction(Constants.REJECT);
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any()))
+                .thenReturn(Map.of("result", Map.of("response", Map.of("content", List.of(Map.of("userId", "leader1"))))));
+        when(userUtil.userProfileRead(any())).thenReturn(Collections.emptyMap());
+
+        ReflectionTestUtils.invokeMethod(workflowServiceImpl, "sendNotification", "name", "deptName", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.TRANSFER_UPDATE), eq(Constants.UPDATE), eq(List.of("user1")), any(), any());
+    }
+
+    @Test
+    void testGetAiAssessmentRequests_hasStatusAndDept() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setApplicationStatus("PENDING");
+        criteria.setDeptName("dept1");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+
+        Page<WfStatusEntity> page = new PageImpl<>(mockWfList("app1", "u1"));
+        when(wfStatusRepo.findByServiceNameAndCurrentStatusAndDeptName(eq(Constants.AI_ASSESSMENT_SERVICE_NAME), eq("PENDING"), eq("dept1"), any()))
+                .thenReturn(page);
+        when(userProfileWfService.enrichUserData(any(), any())).thenReturn(new ArrayList<>(mockUserProfiles()));
+
+        Response response = workflowServiceImpl.getAiAssessmentRequests(criteria);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testGetAiAssessmentRequests_hasStatusOnly_emptyEntities() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setApplicationStatus("PENDING");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+
+        Page<WfStatusEntity> page = new PageImpl<>(Collections.emptyList());
+        when(wfStatusRepo.findByServiceNameAndCurrentStatus(eq(Constants.AI_ASSESSMENT_SERVICE_NAME), eq("PENDING"), any()))
+                .thenReturn(page);
+
+        Response response = workflowServiceImpl.getAiAssessmentRequests(criteria);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        assertEquals(0, response.get(Constants.COUNT));
+    }
+
+    @Test
+    void testGetAiAssessmentRequests_hasDeptOnly() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("dummy");
+        criteria.setDeptName("dept1");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+
+        Page<WfStatusEntity> page = new PageImpl<>(Collections.emptyList());
+        when(wfStatusRepo.findByServiceNameAndDeptName(eq(Constants.AI_ASSESSMENT_SERVICE_NAME), eq("dept1"), any()))
+                .thenReturn(page);
+
+        Response response = workflowServiceImpl.getAiAssessmentRequests(criteria);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testGetAiAssessmentRequests_neitherStatusNorDept_sortsByLatestCreatedOn() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("dummy");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+
+        WfStatusEntity older = new WfStatusEntity();
+        older.setApplicationId("app1");
+        older.setCreatedOn(new Date(1000));
+        WfStatusEntity newer = new WfStatusEntity();
+        newer.setApplicationId("app2");
+        newer.setCreatedOn(new Date(5000));
+
+        Page<WfStatusEntity> page = new PageImpl<>(List.of(older, newer));
+        when(wfStatusRepo.findByServiceName(eq(Constants.AI_ASSESSMENT_SERVICE_NAME), any()))
+                .thenReturn(page);
+
+        Map<String, Object> profileOld = new HashMap<>();
+        profileOld.put(Constants.WF_INFO, List.of(older));
+        Map<String, Object> profileNew = new HashMap<>();
+        profileNew.put(Constants.WF_INFO, List.of(newer));
+        when(userProfileWfService.enrichUserData(any(), any()))
+                .thenReturn(new ArrayList<>(List.of(profileOld, profileNew)));
+
+        Response response = workflowServiceImpl.getAiAssessmentRequests(criteria);
+
+        List<Map<String, Object>> data = (List<Map<String, Object>>) response.get(Constants.DATA);
+        assertEquals(profileNew, data.get(0));
+    }
+
+    @Test
+    void testGetAiAssessmentRequests_exception_wrapsInApplicationException() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("dummy");
+
+        when(configuration.getDefaultLimit()).thenReturn(10);
+        when(configuration.getMaxLimit()).thenReturn(50);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+        when(wfStatusRepo.findByServiceName(any(), any())).thenThrow(new RuntimeException("boom"));
+
+        ApplicationException ex = assertThrows(ApplicationException.class,
+                () -> workflowServiceImpl.getAiAssessmentRequests(criteria));
+        assertEquals("Error fetching AI Assessment requests", ex.getMessage());
+    }
+
+    @Test
+    void testResolveApplicationIdsForApproval_queryPresent_rootOrgRequiredButMissing_returnsErrorResolution() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        criteria.setQuery("search text");
+        criteria.setRequestType(List.of(Constants.GROUP_CHANGE));
+
+        Pageable pageable = PageRequest.of(0, 10);
+        Map<String, Object> userInfoMap = new HashMap<>();
+
+        Object resolution = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "resolveApplicationIdsForApproval", criteria, "", pageable, userInfoMap);
+
+        Response errorResponse = (Response) ReflectionTestUtils.invokeMethod(resolution, "errorResponse");
+        assertNotNull(errorResponse);
+        assertEquals(HttpStatus.BAD_REQUEST, errorResponse.get(Constants.STATUS));
+    }
+
+    @Test
+    void testResolveApplicationIdsForApproval_queryPresent_rootOrgProvided_searchesElasticsearch() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        criteria.setQuery("search text");
+        criteria.setDeptName("dept1");
+        criteria.setRequestType(List.of(Constants.GROUP_CHANGE));
+
+        Pageable pageable = PageRequest.of(0, 10);
+        Map<String, Object> userInfoMap = new HashMap<>();
+
+        when(eServiceManager.searchUsers(eq("search text"), eq(0), eq(10), any(), eq("dept1"), eq(List.of(Constants.GROUP_CHANGE))))
+                .thenAnswer(invocation -> {
+                    Map<String, Object> map = invocation.getArgument(3);
+                    map.put("app1", Map.of("name", "u1"));
+                    return 7L;
+                });
+
+        Object resolution = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "resolveApplicationIdsForApproval", criteria, "rootOrgX", pageable, userInfoMap);
+
+        long totalSearchCount = (long) ReflectionTestUtils.invokeMethod(resolution, "totalSearchCount");
+        List<String> applicationIds = (List<String>) ReflectionTestUtils.invokeMethod(resolution, "applicationIds");
+
+        assertEquals(7L, totalSearchCount);
+        assertEquals(List.of("app1"), applicationIds);
+    }
+
+    @Test
+    void testBuildUserProfilesForApproval_queryPresent_usesEsSortedProfiles() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setQuery("text");
+
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setApplicationId("app1");
+        Map<String, Object> userInfoMap = new HashMap<>();
+        userInfoMap.put("app1", Map.of(Constants.SEARCH_SCORE, 2.0f));
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "buildUserProfilesForApproval", criteria, List.of(entity), userInfoMap, "rootOrg1");
+
+        assertEquals(1, result.size());
+        assertNotNull(result.get(0).get(Constants.WF_INFO));
+    }
+
+    @Test
+    void testBuildUserProfilesForApproval_noQuery_emptyEntities_returnsEmptyList() {
+        SearchCriteria criteria = new SearchCriteria();
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "buildUserProfilesForApproval", criteria, Collections.emptyList(), new HashMap<>(), "rootOrg1");
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testBuildUserProfilesForApproval_noQuery_withEntities_enrichesAndSorts() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setSortBy(new HashMap<>(Map.of("first_name", "asc")));
+
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setApplicationId("app1");
+
+        when(userProfileWfService.enrichUserData(any(), any())).thenReturn(new ArrayList<>(mockUserProfiles()));
+
+        List<Map<String, Object>> result = ReflectionTestUtils.invokeMethod(
+                workflowServiceImpl, "buildUserProfilesForApproval", criteria, List.of(entity), new HashMap<>(), "rootOrg1");
+
+        assertEquals(1, result.size());
     }
 }

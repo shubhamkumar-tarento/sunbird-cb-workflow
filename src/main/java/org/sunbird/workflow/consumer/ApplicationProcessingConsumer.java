@@ -1,8 +1,5 @@
 package org.sunbird.workflow.consumer;
 
-import java.util.concurrent.CompletableFuture;
-
-import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -13,6 +10,7 @@ import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.service.impl.ApplicationProcessingServiceImpl;
 import org.sunbird.workflow.service.impl.WorkflowAuditProcessingServiceImpl;
 import org.sunbird.workflow.service.impl.WorkflowESSyncServiceImpl;
+import org.sunbird.workflow.utils.ApplicationProcessingConsumerUtil;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -39,15 +37,7 @@ public class ApplicationProcessingConsumer {
 
     @KafkaListener(groupId = "workflowContentTopic-consumer", topics = "${kafka.topics.workflow.request}")
     public void processMessage(ConsumerRecord<String, String> data) {
-        try {
-            if (StringUtils.isNoneBlank(data.value())) {
-                CompletableFuture.runAsync(() -> processApplicationMessage(data.value()));
-            } else {
-                logger.error("Error in Application Consumer: Invalid Kafka Msg");
-            }
-        } catch (Exception e) {
-            logger.error(String.format("Error in Application Consumer: Error Msg :%s", e.getMessage()), e);
-        }
+        ApplicationProcessingConsumerUtil.processMessage(data, logger, this::processApplicationMessage);
     }
 
     private void processApplicationMessage(String strData) {

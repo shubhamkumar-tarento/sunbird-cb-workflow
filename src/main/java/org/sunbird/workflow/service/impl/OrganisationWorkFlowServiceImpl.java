@@ -95,32 +95,14 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
      * @return - Returns a boolean value true if the data already exists else false.
      */
     public boolean isUserDetailExists(String key, String value) {
-        Map<String, Object> reqMap = new HashMap<>();
-        reqMap.put(Constants.FILTERS, Collections.singletonMap(key, value));
-        Map<String, Object> requestObj = new HashMap<>();
-        requestObj.put(Constants.REQUEST, reqMap);
-        HashMap<String, String> headersValue = new HashMap<>();
-        headersValue.put(Constants.CONTENT_TYPE, Constants.APPLICATION_JSON);
-        try {
-            StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
-            builder.append(configuration.getLmsUserSearchEndPoint());
-            Map<String, Object> response = (Map<String, Object>) requestServiceImpl
-                    .fetchResultUsingPost(builder, requestObj, Map.class, headersValue);
-            if (response != null && Constants.OK.equalsIgnoreCase((String)response.get(Constants.RESPONSE_CODE))) {
-                Map<String, Object> map = (Map<String, Object>) response.get(Constants.RESULT);
-                if (map.get(Constants.RESPONSE) != null) {
-                    Map<String, Object> responseObj = (Map<String, Object>) map.get(Constants.RESPONSE);
-                    int count = (int) responseObj.get(Constants.COUNT);
-                    return count != 0;
-                }
-            }
-        } catch (Exception e) {
-            logger.info("There is a error occured while searching for the user details : {}", e.getMessage(), e);
-        }
-        return true;
+        return checkDetailExists(key, value, configuration.getLmsUserSearchEndPoint(), "user details");
     }
 
     public boolean isOrgDetailExists(String key, String value) {
+        return checkDetailExists(key, value, configuration.getLmsOrgSearchEndPoint(), "Org details");
+    }
+
+    private boolean checkDetailExists(String key, String value, String endpoint, String errorContext) {
         Map<String, Object> reqMap = new HashMap<>();
         reqMap.put(Constants.FILTERS, Collections.singletonMap(key, value));
         Map<String, Object> requestObj = new HashMap<>();
@@ -129,7 +111,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
         headersValue.put(Constants.CONTENT_TYPE, Constants.APPLICATION_JSON);
         try {
             StringBuilder builder = new StringBuilder(configuration.getLmsServiceHost());
-            builder.append(configuration.getLmsOrgSearchEndPoint());
+            builder.append(endpoint);
             Map<String, Object> response = (Map<String, Object>) requestServiceImpl
                     .fetchResultUsingPost(builder, requestObj, Map.class, headersValue);
             if (response != null && Constants.OK.equalsIgnoreCase((String)response.get(Constants.RESPONSE_CODE))) {
@@ -141,7 +123,7 @@ public class OrganisationWorkFlowServiceImpl implements OrganisationWorkFlowServ
                 }
             }
         } catch (Exception e) {
-            logger.info("There is a error occured while searching for the Org details : {}", e.getMessage(), e);
+            logger.info("There is a error occured while searching for the {} : {}", errorContext, e.getMessage(), e);
         }
         return true;
     }

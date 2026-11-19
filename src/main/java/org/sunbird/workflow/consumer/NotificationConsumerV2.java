@@ -2,8 +2,6 @@ package org.sunbird.workflow.consumer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.logging.log4j.LogManager;
@@ -17,8 +15,6 @@ import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.service.impl.NotificationServiceImpl;
 import org.sunbird.workflow.utils.CassandraOperation;
 
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -88,16 +84,6 @@ public class NotificationConsumerV2 {
     }
 
     public Map<String, Object> getCourseAttributes(String courseId) {
-        Map<String, Object> propertiesMap = new HashMap<>();
-        Map<String, Object> courseDetails = new HashMap<>();
-        propertiesMap.put(Constants.IDENTIFIER, courseId);
-        List<Map<String, Object>> coursesDataList = cassandraOperation.getRecordsByProperties(configuration.getEnvHierarchyKeystoreKeyspaceName(),
-                Constants.CONTENT_HIERARCHY,
-                propertiesMap,
-                Arrays.asList(Constants.IDENTIFIER, Constants.HIERARCHY));
-        Map<String, Object> hierarchy = new Gson().fromJson((String) coursesDataList.get(0).get("hierarchy"), new TypeToken<HashMap<String, Object>>() {
-        }.getType());
-        courseDetails.put(Constants.COURSE_NAME, hierarchy.get(Constants.NAME));
-        return courseDetails;
+        return org.sunbird.workflow.utils.NotificationConsumerUtil.getCourseAttributes(cassandraOperation, configuration, courseId);
     }
 }

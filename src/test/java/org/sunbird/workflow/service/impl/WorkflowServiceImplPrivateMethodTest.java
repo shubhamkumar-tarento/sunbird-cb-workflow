@@ -26,6 +26,7 @@ import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
 import org.sunbird.workflow.utils.NotificationTriggerService;
+import org.sunbird.workflow.utils.UserUtil;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -60,6 +61,9 @@ class WorkflowServiceImplPrivateMethodTest {
 
     @Mock
     NotificationTriggerService notificationTriggerService;
+
+    @Mock
+    UserUtil userUtil;
 
     @BeforeEach
     void setup() {
@@ -380,8 +384,8 @@ class WorkflowServiceImplPrivateMethodTest {
 
         List<Map<String, Object>> pendingRequests = new ArrayList<>();
         Map<String, Object> pendingRequest = new HashMap<>();
-        pendingRequest.put("GROUP", "Engineering");
-        pendingRequest.put("DESIGNATION", "Developer");
+        pendingRequest.put(Constants.GROUP, "Engineering");
+        pendingRequest.put(Constants.DESIGNATION, "Developer");
         pendingRequests.add(pendingRequest);
 
         String userId = "user123";
@@ -612,7 +616,7 @@ class WorkflowServiceImplPrivateMethodTest {
                 .thenReturn(List.of(Map.of(Constants.TO_VALUE, Map.of("key1", "val1"))));
 
         String result = (String) ReflectionTestUtils.invokeMethod(
-                workflowService, "getKeyFromUpdateFieldValues", json);
+                org.sunbird.workflow.utils.WorkflowHelperUtil.class, "getKeyFromUpdateFieldValues", json, mapper);
 
         assertEquals("key1", result);
     }
@@ -624,7 +628,7 @@ class WorkflowServiceImplPrivateMethodTest {
                 .thenReturn(List.of(Map.of(Constants.TO_VALUE, Map.of())));
 
         String result = (String) ReflectionTestUtils.invokeMethod(
-                workflowService, "getKeyFromUpdateFieldValues", json);
+                org.sunbird.workflow.utils.WorkflowHelperUtil.class, "getKeyFromUpdateFieldValues", json, mapper);
 
         assertNull(result);
     }
@@ -732,7 +736,6 @@ void testHandleProfileServiceWorkflow_requestExists() {
 
         when(configuration.getLmsServiceHost()).thenReturn("http://host/");
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("/user/{userId}");
 
         Map<String, Object> mockedResponse =
                 Map.of("result",
@@ -741,12 +744,6 @@ void testHandleProfileServiceWorkflow_requestExists() {
 
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any()))
                 .thenReturn(mockedResponse);
-
-        when(requestServiceImpl.fetchResultUsingGet(any()))
-                .thenReturn(new HashMap<>());  // mock some response
-
-        when(mapper.convertValue(any(), eq(Map.class)))
-                .thenReturn(Map.of(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of())));
 
         doNothing().when(notificationTriggerService).triggerNotification(any(), any(), any(), any(), any());
 
@@ -765,7 +762,6 @@ void testHandleProfileServiceWorkflow_requestExists() {
 
         when(configuration.getLmsServiceHost()).thenReturn("http://host/");
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("/user/{userId}");
 
         // mock POST (MDO leader search)
         Map<String, Object> mockedPostResponse =
@@ -776,19 +772,15 @@ void testHandleProfileServiceWorkflow_requestExists() {
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any()))
                 .thenReturn(mockedPostResponse);
 
-        // mock GET (user profile)
-        when(requestServiceImpl.fetchResultUsingGet(any()))
-                .thenReturn(new HashMap<>());
-
-        when(mapper.convertValue(any(), eq(Map.class)))
-                .thenReturn(Map.of(Constants.RESULT, Map.of(Constants.RESPONSE, Map.of(
-                        Constants.FIRST_NAME_CAMEL_CASE, "John Doe",
-                        Constants.PROFILE_DETAILS, Map.of(
-                                Constants.EMPLOYMENT_DETAILS, Map.of(
-                                        Constants.DEPARTMENT_NAME, "IT Department"
-                                )
+        // mock user profile read (now routed through UserUtil)
+        when(userUtil.userProfileRead(any())).thenReturn(Map.of(
+                Constants.FIRST_NAME_CAMEL_CASE, "John Doe",
+                Constants.PROFILE_DETAILS, Map.of(
+                        Constants.EMPLOYMENT_DETAILS, Map.of(
+                                Constants.DEPARTMENT_NAME, "IT Department"
                         )
-                ))));
+                )
+        ));
 
         doNothing().when(notificationTriggerService).triggerNotification(any(), any(), any(), any(), any());
 
@@ -836,26 +828,15 @@ void testHandleProfileServiceWorkflow_requestExists() {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setUserId("user1");
 
-        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("/user/{userId}");
-
-        Map<String, Object> fakeResponse = new HashMap<>();
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(fakeResponse);
-
-        Map<String, Object> expectedMap = Map.of(
-                Constants.RESULT, Map.of(
-                        Constants.RESPONSE, Map.of(
-                                Constants.FIRST_NAME_CAMEL_CASE, "John",
-                                Constants.PROFILE_DETAILS, Map.of(
-                                        Constants.EMPLOYMENT_DETAILS, Map.of(
-                                                Constants.DEPARTMENT_NAME, "IT"
-                                        )
-                                )
+        Map<String, Object> expectedUserResponse = Map.of(
+                Constants.FIRST_NAME_CAMEL_CASE, "John",
+                Constants.PROFILE_DETAILS, Map.of(
+                        Constants.EMPLOYMENT_DETAILS, Map.of(
+                                Constants.DEPARTMENT_NAME, "IT"
                         )
                 )
         );
-
-        when(mapper.convertValue(any(), eq(Map.class))).thenReturn(expectedMap);
+        when(userUtil.userProfileRead(wfRequest.getUserId())).thenReturn(expectedUserResponse);
 
         Map<String, Object> result = ReflectionTestUtils.invokeMethod(workflowService, "userProfileRead", wfRequest.getUserId());
 
@@ -865,9 +846,7 @@ void testHandleProfileServiceWorkflow_requestExists() {
 
     @Test
     void testUserProfileRead_emptyResponse() {
-        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
-        when(configuration.getUserProfileReadEndPoint()).thenReturn("/user/{userId}");
-        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(null);
+        when(userUtil.userProfileRead("user1")).thenReturn(Collections.emptyMap());
 
         Object result = ReflectionTestUtils.invokeMethod(workflowService,
                 "userProfileRead", "user1");

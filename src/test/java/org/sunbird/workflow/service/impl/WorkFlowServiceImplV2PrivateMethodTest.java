@@ -14,13 +14,16 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.config.RedisCacheMgr;
+import org.sunbird.workflow.exception.ApplicationException;
 import org.sunbird.workflow.exception.BadRequestException;
 import org.sunbird.workflow.exception.InvalidDataInputException;
 import org.sunbird.workflow.models.Response;
+import org.sunbird.workflow.models.WfAction;
 import org.sunbird.workflow.models.WfRequest;
 import org.sunbird.workflow.models.WfStatus;
 import org.sunbird.workflow.models.WorkFlowModel;
@@ -28,7 +31,9 @@ import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
 import org.sunbird.workflow.producer.Producer;
 import org.sunbird.workflow.utils.CassandraOperation;
+import org.sunbird.workflow.utils.NotificationTriggerService;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
@@ -59,6 +64,9 @@ class WorkFlowServiceImplV2PrivateMethodTest {
 
     @Mock
     private RedisCacheMgr redisCacheMgr;
+
+    @Mock
+    private NotificationTriggerService notificationTriggerService;
 
     WfStatusEntity applicationStatus;
 
@@ -191,6 +199,61 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     }
 
     @Test
+    void testHandleProfileServiceWorkflow_existingRequest_setsSendForApprovalAndBreaks() throws Exception {
+        ReflectionTestUtils.setField(workFlowService, "wfStatusRepo", wfStatusRepo);
+        ReflectionTestUtils.setField(workFlowService, "mapper", mapper);
+
+        WfRequest wfRequest = createWfRequest();
+
+        WfStatusEntity existing = new WfStatusEntity();
+        existing.setUpdateFieldValues("[{\"toValue\":{\"name\":\"newDept\"}}]");
+        existing.setWfId("existingWf");
+        when(wfStatusRepo.getPendingRequests(any(), any(), any())).thenReturn(List.of(existing));
+        Map<String, Object> existingToValue = Map.of("name", "newDept");
+        Map<String, Object> existingItem = Map.of(TO_VALUE, existingToValue);
+        List<Map<String, Object>> existingParsed = List.of(existingItem);
+        when(mapper.readValue(eq("[{\"toValue\":{\"name\":\"newDept\"}}]"), any(TypeReference.class)))
+                .thenReturn(existingParsed);
+
+        Method method = WorkFlowServiceImplV2.class
+                .getDeclaredMethod("handleProfileServiceWorkflow", WfRequest.class, Map.class);
+        method.setAccessible(true);
+
+        Map<String, Object> responseData = new HashMap<>();
+        boolean result = (boolean) method.invoke(workFlowService, wfRequest, responseData);
+
+        assertTrue(result);
+        assertEquals(Constants.SEND_FOR_APPROVAL, responseData.get(Constants.STATUS));
+        assertEquals("existingWf", responseData.get(Constants.WF_ID_CONSTANT));
+    }
+
+    @Test
+    void testHandleProfileServiceWorkflow_ioExceptionWrappedAsApplicationException() throws Exception {
+        ReflectionTestUtils.setField(workFlowService, "wfStatusRepo", wfStatusRepo);
+        ReflectionTestUtils.setField(workFlowService, "mapper", mapper);
+
+        WfRequest wfRequest = createWfRequest();
+
+        WfStatusEntity existing = new WfStatusEntity();
+        existing.setUpdateFieldValues("not-valid-json-but-stubbed");
+        existing.setWfId("existingWf");
+        when(wfStatusRepo.getPendingRequests(any(), any(), any())).thenReturn(List.of(existing));
+        when(mapper.readValue(eq("not-valid-json-but-stubbed"), any(TypeReference.class)))
+                .thenThrow(new JsonProcessingException("bad json") {
+                });
+
+        Method method = WorkFlowServiceImplV2.class
+                .getDeclaredMethod("handleProfileServiceWorkflow", WfRequest.class, Map.class);
+        method.setAccessible(true);
+
+        Map<String, Object> responseData = new HashMap<>();
+        InvocationTargetException ex = assertThrows(InvocationTargetException.class,
+                () -> method.invoke(workFlowService, wfRequest, responseData));
+
+        assertTrue(ex.getCause() instanceof ApplicationException);
+    }
+
+    @Test
     void testIsWFRequestExist_notFound() throws Exception {
         ReflectionTestUtils.setField(workFlowService, "wfStatusRepo", wfStatusRepo);
         ReflectionTestUtils.setField(workFlowService, "mapper", mapper);
@@ -226,11 +289,12 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         when(mapper.readValue(eq(jsonInput), any(TypeReference.class)))
                 .thenReturn(list);
 
-        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("getKeyFromUpdateFieldValues", String.class);
+        Method method = org.sunbird.workflow.utils.WorkflowHelperUtil.class
+                .getDeclaredMethod("getKeyFromUpdateFieldValues", String.class, ObjectMapper.class);
         method.setAccessible(true);
 
         // When
-        String result = (String) method.invoke(workFlowService, jsonInput);
+        String result = (String) method.invoke(null, jsonInput, mapper);
 
         // Then
         assertEquals("key", result);
@@ -248,11 +312,12 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         when(mapper.readValue(eq(jsonInput), any(TypeReference.class)))
                 .thenReturn(list);
 
-        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("getKeyFromUpdateFieldValues", String.class);
+        Method method = org.sunbird.workflow.utils.WorkflowHelperUtil.class
+                .getDeclaredMethod("getKeyFromUpdateFieldValues", String.class, ObjectMapper.class);
         method.setAccessible(true);
 
         // When
-        String result = (String) method.invoke(workFlowService, jsonInput);
+        String result = (String) method.invoke(null, jsonInput, mapper);
 
         // Then
         assertNull(result);
@@ -263,13 +328,13 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         // Given
         String jsonInput = "invalid_json";
 
-        Method method = WorkFlowServiceImplV2.class
-                .getDeclaredMethod("getKeyFromUpdateFieldValues", String.class);
+        Method method = org.sunbird.workflow.utils.WorkflowHelperUtil.class
+                .getDeclaredMethod("getKeyFromUpdateFieldValues", String.class, ObjectMapper.class);
         method.setAccessible(true);
 
         // When & Then
         InvocationTargetException thrown = assertThrows(InvocationTargetException.class, () -> {
-            method.invoke(workFlowService, jsonInput);
+            method.invoke(null, jsonInput, mapper);
         });
         assertTrue(thrown.getCause() instanceof Exception);
     }
@@ -442,6 +507,167 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         ReflectionTestUtils.invokeMethod(workFlowService, "handleSpecialFields", wfRequest);
 
         assertNull(wfRequest.getPreviousRootOrgId());
+    }
+
+    @Test
+    void testSendNotification_nullWfRequest_isNoOp() {
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", (WfRequest) null));
+    }
+
+    @Test
+    void testSendNotification_emptyUpdateFieldValues_isNoOp() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUpdateFieldValues(Collections.emptyList());
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest));
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testSendNotification_toValueNotAMap_isNoOp() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, "not-a-map");
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest));
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testSendNotification_toValueEmptyMap_isNoOp() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, new HashMap<>());
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest));
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testSendNotification_nameKey_triggersOrgTransferUpdateNotification() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        HashMap<String, Object> toValue = new HashMap<>();
+        toValue.put(Constants.NAME, "newOrg");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.TRANSFER_UPDATE), eq(Constants.UPDATE),
+                eq(List.of("user1")), any(), any());
+    }
+
+    @Test
+    void testSendNotification_groupKey_triggersProfileUpdateNotification() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        HashMap<String, Object> toValue = new HashMap<>();
+        toValue.put(Constants.GROUP, "G1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.PROFILE_UPDATE), eq(Constants.UPDATE),
+                eq(List.of("user1")), any(), any());
+    }
+
+    @Test
+    void testSendNotification_designationKey_triggersProfileUpdateNotification() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        HashMap<String, Object> toValue = new HashMap<>();
+        toValue.put(Constants.DESIGNATION, "D1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.PROFILE_UPDATE), eq(Constants.UPDATE),
+                eq(List.of("user1")), any(), any());
+    }
+
+    @Test
+    void testSendNotification_unrecognizedKey_doesNothing() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        HashMap<String, Object> toValue = new HashMap<>();
+        toValue.put("someOtherKey", "value");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "sendNotification", wfRequest);
+
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testHandlePostWorkflowNotification_profileServiceNotWithdraw_sendsNotification() {
+        ReflectionTestUtils.setField(workFlowService, "notificationTriggerService", notificationTriggerService);
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setAction("APPROVE");
+        wfRequest.setUserId("user1");
+        HashMap<String, Object> toValue = new HashMap<>();
+        toValue.put(Constants.GROUP, "G1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "handlePostWorkflowNotification", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.PROFILE_UPDATE), eq(Constants.UPDATE),
+                any(), any(), any());
+    }
+
+    @Test
+    void testHandlePostWorkflowNotification_withdrawAction_doesNotSendNotification() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setAction(Constants.WITHDRAW);
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "handlePostWorkflowNotification", wfRequest);
+
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testHandlePostWorkflowNotification_nonProfileService_doesNotSendNotification() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName("someOtherService");
+        wfRequest.setAction("APPROVE");
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "handlePostWorkflowNotification", wfRequest);
+
+        verifyNoInteractions(notificationTriggerService);
+    }
+
+    @Test
+    void testValidateUserAndWfStatus_blankWfId_notStartState_throwsApplicationException() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId("");
+        wfRequest.setState("PENDING");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setStartState(false);
+
+        ApplicationException ex = assertThrows(ApplicationException.class, () ->
+                ReflectionTestUtils.invokeMethod(workFlowService,
+                        "validateUserAndWfStatus", wfRequest, wfStatus, null));
+        assertEquals(Constants.WORKFLOW_ID_ERROR_MESSAGE, ex.getMessage());
     }
 
     @Test
@@ -771,6 +997,315 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         assertEquals(Constants.WORKFLOW_STATE_CHECK_ERROR, exception.getCause().getMessage());
     }
 
+
+    @Test
+    void testChangeStatus_newApplication_success() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setUserId("user1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId("wf1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(new HashMap<>());
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(buildTwoStateWorkFlowModel());
+
+        WfStatusEntity saved = new WfStatusEntity();
+        saved.setUserId("user1");
+        when(wfStatusRepo.save(any())).thenReturn(saved);
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("changeStatus",
+                String.class, String.class, WfRequest.class, String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        Map<String, String> result = (Map<String, String>) method.invoke(workFlowService, "root", "org", wfRequest, "", "role1", "token");
+
+        assertEquals("APPROVED", result.get(Constants.STATUS));
+        verify(wfStatusRepo).save(any());
+    }
+
+    @Test
+    void testChangeStatus_existingApplication_setsCreatedOnFromExisting() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setUserId("user1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId("wf1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        WfStatusEntity existingStatus = new WfStatusEntity();
+        existingStatus.setWfId("wf1");
+        existingStatus.setCurrentStatus("PENDING");
+        existingStatus.setCreatedOn(new Date());
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(existingStatus);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(new HashMap<>());
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(buildTwoStateWorkFlowModel());
+
+        WfStatusEntity saved = new WfStatusEntity();
+        saved.setUserId("user1");
+        when(wfStatusRepo.save(any())).thenReturn(saved);
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("changeStatus",
+                String.class, String.class, WfRequest.class, String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        Map<String, String> result = (Map<String, String>) method.invoke(workFlowService, "root", "org", wfRequest, "", "role1", "token");
+
+        assertEquals("wf1", result.get(Constants.WF_ID_CONSTANT));
+        assertNotNull(wfRequest.getCreatedOn());
+    }
+
+    @Test
+    void testChangeStatus_ioExceptionDuringUpdate_wrappedAsApplicationException() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setUserId("user1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId("wf1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(new HashMap<>());
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(buildTwoStateWorkFlowModel());
+        when(mapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("boom") {
+        });
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("changeStatus",
+                String.class, String.class, WfRequest.class, String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        InvocationTargetException ex = assertThrows(InvocationTargetException.class, () ->
+                method.invoke(workFlowService, "root", "org", wfRequest, "", "role1", "token"));
+
+        assertTrue(ex.getCause() instanceof ApplicationException);
+        assertEquals(Constants.WORKFLOW_PARSING_ERROR_MESSAGE, ex.getCause().getMessage());
+    }
+
+    @Test
+    void testAutoCompleteGroupDesignationAfterTransfer_noPendingEntities_logsWarningAndSkipsSave() throws Exception {
+        when(wfStatusRepo.findByUserIdAndCurrentStatus(eq("user1"), eq(Constants.SEND_FOR_APPROVAL), eq(true)))
+                .thenReturn(Collections.emptyList());
+
+        WfStatusEntity status = new WfStatusEntity();
+        status.setUserId("user1");
+        WfRequest wfRequest = new WfRequest();
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("autoCompleteGroupDesignationAfterTransfer",
+                WfStatusEntity.class, WfRequest.class, String.class, boolean.class, Date.class, String.class, String.class);
+        method.setAccessible(true);
+
+        assertDoesNotThrow(() -> method.invoke(workFlowService, status, wfRequest, "APPROVED", true, new Date(), "user1", "token"));
+
+        verify(wfStatusRepo, never()).saveAll(any());
+    }
+
+    @Test
+    void testAutoCompleteGroupDesignationAfterTransfer_allEntitiesInvalid_skipsSaveAndPush() throws Exception {
+        WfStatusEntity badEntity = new WfStatusEntity();
+        badEntity.setUpdateFieldValues(""); // blank -> buildValidGroupDesignationEntity returns early
+        when(wfStatusRepo.findByUserIdAndCurrentStatus(eq("user1"), eq(Constants.SEND_FOR_APPROVAL), eq(true)))
+                .thenReturn(List.of(badEntity));
+
+        WfStatusEntity status = new WfStatusEntity();
+        status.setUserId("user1");
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setComment("c");
+        wfRequest.setAction("APPROVE");
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("autoCompleteGroupDesignationAfterTransfer",
+                WfStatusEntity.class, WfRequest.class, String.class, boolean.class, Date.class, String.class, String.class);
+        method.setAccessible(true);
+
+        assertDoesNotThrow(() -> method.invoke(workFlowService, status, wfRequest, "APPROVED", true, new Date(), "user1", "token"));
+
+        verify(wfStatusRepo, never()).saveAll(any());
+    }
+
+    @Test
+    void testBuildValidGroupDesignationEntity_jsonProcessingException_isCaught() throws Exception {
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setUpdateFieldValues("not-valid-json");
+        wfStatusEntity.setWfId("wf1");
+        wfStatusEntity.setUserId("user1");
+
+        when(mapper.readValue(eq("not-valid-json"), any(TypeReference.class)))
+                .thenThrow(new JsonProcessingException("bad") {
+                });
+
+        WfRequest wfRequest = new WfRequest();
+        List<WfStatusEntity> validEntities = new ArrayList<>();
+        List<Object> wfRequestsForEvent = new ArrayList<>();
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("buildValidGroupDesignationEntity",
+                WfStatusEntity.class, WfRequest.class, String.class, boolean.class, Date.class, List.class, List.class);
+        method.setAccessible(true);
+
+        assertDoesNotThrow(() -> method.invoke(workFlowService, wfStatusEntity, wfRequest, "APPROVED", true, new Date(), validEntities, wfRequestsForEvent));
+
+        assertTrue(validEntities.isEmpty());
+        assertTrue(wfRequestsForEvent.isEmpty());
+    }
+
+    @Test
+    void testProcessSingleWfRequestForEvent_exceptionWithBlankWfId_setsEmptyWfIdInResponse() throws Exception {
+        Class<?> ctxClass = Class.forName("org.sunbird.workflow.service.impl.WorkFlowServiceImplV2$WfTransitionContext");
+        Constructor<?> ctor = ctxClass.getDeclaredConstructor(String.class, String.class, String.class, String.class, String.class);
+        ctor.setAccessible(true);
+        Object context = ctor.newInstance("root", "org", "", "", "token");
+
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId(""); // blank
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setUserId("user1");
+        wfRequest.setAction("APPROVE");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        when(wfStatusRepo.getPendingRequests(any(), any(), any())).thenReturn(Collections.emptyList());
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenThrow(new RuntimeException("config fetch failed"));
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("processSingleWfRequestForEvent",
+                ctxClass, WfRequest.class, List.class, List.class);
+        method.setAccessible(true);
+
+        List<Object> wfRequestsForEvent = new ArrayList<>();
+        List<Object> data = new ArrayList<>();
+
+        boolean result = (boolean) method.invoke(workFlowService, context, wfRequest, wfRequestsForEvent, data);
+
+        assertFalse(result);
+        assertEquals(1, data.size());
+        Map<?, ?> responseData = (Map<?, ?>) data.get(0);
+        assertEquals("", responseData.get(Constants.WF_ID_CONSTANT));
+        assertEquals(Constants.FAILED, responseData.get(Constants.STATUS));
+    }
+
+    @Test
+    void testProcessWfRequestsForUser_breaksOnExistingProfileWorkflow_skipsPush() throws Exception {
+        Class<?> ctxClass = Class.forName("org.sunbird.workflow.service.impl.WorkFlowServiceImplV2$WfTransitionContext");
+        Constructor<?> ctor = ctxClass.getDeclaredConstructor(String.class, String.class, String.class, String.class, String.class);
+        ctor.setAccessible(true);
+        Object context = ctor.newInstance("root", "org", "", "", "token");
+
+        WfRequest wfRequest1 = new WfRequest();
+        wfRequest1.setUserId("userB");
+        wfRequest1.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest1.setWfId(""); // blank -> eligible for handleProfileServiceWorkflow
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("group", "G2"));
+        wfRequest1.setUpdateFieldValues(List.of(updateField));
+
+        WfStatusEntity existing = new WfStatusEntity();
+        existing.setUpdateFieldValues("[{\"toValue\":{\"group\":\"G2\"}}]");
+        existing.setWfId("existingWf");
+        when(wfStatusRepo.getPendingRequests(eq("userB"), eq(Constants.PROFILE_SERVICE_NAME), eq(Constants.SEND_FOR_APPROVAL)))
+                .thenReturn(List.of(existing));
+        Map<String, Object> existingToValue = Map.of("group", "G2");
+        Map<String, Object> existingItem = Map.of(TO_VALUE, existingToValue);
+        List<Map<String, Object>> existingParsed = List.of(existingItem);
+        when(mapper.readValue(eq("[{\"toValue\":{\"group\":\"G2\"}}]"), any(TypeReference.class)))
+                .thenReturn(existingParsed);
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("processWfRequestsForUser",
+                ctxClass, String.class, List.class, String.class, List.class);
+        method.setAccessible(true);
+
+        List<Object> data = new ArrayList<>();
+        method.invoke(workFlowService, context, "userB", List.of(wfRequest1), Constants.PROFILE_SERVICE_NAME, data);
+
+        verify(producer, never()).push(any(), any());
+    }
+
+    @Test
+    void testProcessWfRequestsForUser_successfulRequest_pushesWorkflowEvent() throws Exception {
+        Class<?> ctxClass = Class.forName("org.sunbird.workflow.service.impl.WorkFlowServiceImplV2$WfTransitionContext");
+        Constructor<?> ctor = ctxClass.getDeclaredConstructor(String.class, String.class, String.class, String.class, String.class);
+        ctor.setAccessible(true);
+        Object context = ctor.newInstance("root", "org", "", "", "token");
+
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("userA");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId("wf1");
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setAction("APPROVE");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(new HashMap<>());
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(buildTwoStateWorkFlowModel());
+
+        WfStatusEntity saved = new WfStatusEntity();
+        saved.setUserId("userA");
+        when(wfStatusRepo.save(any())).thenReturn(saved);
+
+        when(configuration.getWorkFlowNotificationTopicV2()).thenReturn("notif-topic");
+        when(configuration.getWorkflowApplicationTopicV2()).thenReturn("app-topic");
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("processWfRequestsForUser",
+                ctxClass, String.class, List.class, String.class, List.class);
+        method.setAccessible(true);
+
+        List<Object> data = new ArrayList<>();
+        method.invoke(workFlowService, context, "userA", List.of(wfRequest), Constants.PROFILE_SERVICE_NAME, data);
+
+        assertEquals(1, data.size());
+        verify(producer, times(2)).push(any(), any());
+    }
+
+    private WorkFlowModel buildTwoStateWorkFlowModel() {
+        WfAction action = new WfAction();
+        action.setAction("APPROVE");
+        action.setNextState("APPROVED");
+        WfStatus pending = new WfStatus();
+        pending.setState("PENDING");
+        pending.setActions(List.of(action));
+        pending.setStartState(true);
+        WfStatus approved = new WfStatus();
+        approved.setState("APPROVED");
+        approved.setIsLastState(false);
+        WorkFlowModel model = new WorkFlowModel();
+        model.setWfstates(List.of(pending, approved));
+        return model;
+    }
+
+    private Map<String, Object> buildMockWFConfig() {
+        Map<String, Object> wfConfig = new HashMap<>();
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
+        response.put(Constants.VALUE, "{}");
+        result.put(Constants.RESPONSE, response);
+        wfConfig.put(Constants.RESULT, result);
+        return wfConfig;
+    }
 
     private WfRequest createValidWfRequest() {
         WfRequest wfRequest = new WfRequest();

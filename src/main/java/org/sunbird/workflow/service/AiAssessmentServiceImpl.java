@@ -29,6 +29,7 @@ import org.sunbird.workflow.utils.CassandraOperation;
 import org.sunbird.workflow.utils.ElasticsearchServiceManager;
 import org.sunbird.workflow.utils.LRUCache;
 import org.sunbird.workflow.utils.NotificationTriggerService;
+import org.sunbird.workflow.utils.UserUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,10 +53,10 @@ public class AiAssessmentServiceImpl extends WorkflowServiceImpl {
                                    CassandraOperation cassandraOperation, AccessTokenValidator accessTokenValidator,
                                    LRUCache<String, List<WfStatusCountDTO>> localCache, StorageService storageService,
                                    Producer kafkaProducer, ElasticsearchServiceManager eServiceManager,
-                                   NotificationTriggerService notificationTriggerService) {
+                                   NotificationTriggerService notificationTriggerService, UserUtil userUtil) {
         super(wfStatusRepo, wfAuditRepo, mapper, configuration, userProfileWfService, requestServiceImpl, producer,
                 cassandraOperation, accessTokenValidator, localCache, storageService, kafkaProducer, eServiceManager,
-                notificationTriggerService);
+                notificationTriggerService, userUtil);
         this.accessTokenValidator = accessTokenValidator;
         this.configuration = configuration;
         this.wfStatusRepo = wfStatusRepo;

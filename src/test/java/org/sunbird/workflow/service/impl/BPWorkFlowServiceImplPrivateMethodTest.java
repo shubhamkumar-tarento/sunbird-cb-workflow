@@ -726,4 +726,97 @@ class BPWorkFlowServiceImplPrivateMethodTest {
         boolean result = (boolean) method.invoke(bpWorkFlowService, courseBatchDetails, "regularprogram", batchDetailsMap);
         assertTrue(result, "Should allow same-day enrollment when primaryCategory is Blended Program");
     }
+
+    @Test
+    void testEscapeSpecialCharacters_nullOrEmptyValue_logsAndReturnsEmptyString() {
+        String resultForNull = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "escapeSpecialCharacters", (String) null);
+        String resultForEmpty = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "escapeSpecialCharacters", "");
+
+        assertEquals("", resultForNull);
+        assertEquals("", resultForEmpty);
+    }
+
+    @Test
+    void testEscapeSpecialCharacters_valueWithComma_isQuotedAndEscaped() {
+        String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "escapeSpecialCharacters", "a,b\"c");
+
+        assertEquals("\"a,b\"\"c\"", result);
+    }
+
+    @Test
+    void testIsValidFileFormat_nullFileName_returnsFalse() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "isValidFileFormat", (String) null);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void testIsValidFileFormat_nonCsvExtension_returnsFalse() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "isValidFileFormat", "data.txt");
+
+        assertFalse(result);
+    }
+
+    @Test
+    void testShouldOverride_sameRole_returnsFalse() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "shouldOverride", Constants.PC, Constants.PC);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void testShouldOverride_incomingPc_returnsTrue() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "shouldOverride", Constants.MDO, Constants.PC);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testShouldOverride_incomingMdoOverExistingSelf_returnsTrue() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "shouldOverride", Constants.SELF, Constants.MDO);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testShouldOverride_incomingMdoOverExistingPc_returnsFalse() {
+        boolean result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "shouldOverride", Constants.PC, Constants.MDO);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void testFindRoleFromOrg_rolesNull_returnsNull() {
+        Map<String, Object> org = new HashMap<>();
+        String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "findRoleFromOrg", org);
+
+        assertNull(result);
+    }
+
+    @Test
+    void testFindRoleFromOrg_withProgramCoordinatorRole_returnsPc() {
+        Map<String, Object> org = new HashMap<>();
+        org.put(Constants.ROLES, List.of(Constants.PROGRAM_COORDINATOR));
+        String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "findRoleFromOrg", org);
+
+        assertEquals(Constants.PC, result);
+    }
+
+    @Test
+    void testFindRoleFromOrg_withMdoAdminRole_returnsMdo() {
+        Map<String, Object> org = new HashMap<>();
+        org.put(Constants.ROLES, List.of(Constants.MDO_ADMIN));
+        String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "findRoleFromOrg", org);
+
+        assertEquals(Constants.MDO, result);
+    }
+
+    @Test
+    void testFindRoleFromOrg_withUnrelatedRole_returnsNull() {
+        Map<String, Object> org = new HashMap<>();
+        org.put(Constants.ROLES, List.of("SOME_OTHER_ROLE"));
+        String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "findRoleFromOrg", org);
+
+        assertNull(result);
+    }
 }

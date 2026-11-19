@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.exception.ApplicationException;
+import org.sunbird.workflow.exception.BadRequestException;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
@@ -1491,6 +1492,423 @@ class BPWorkFlowServiceImplTest {
         assertEquals(Constants.SEND_FOR_PC_APPROVAL, entity.getCurrentStatus(), "Entity status should be set to SEND_FOR_PC_APPROVAL");
         assertNotNull(entity.getLastUpdatedOn(), "Entity.lastUpdatedOn should be updated");
         verify(wfStatusRepo).save(entity);
+    }
+
+    @Test
+    void testIsWithinRange_variousBoundaries() {
+        Date start = new Date(1000L);
+        Date end = new Date(2000L);
+        assertTrue(BPWorkFlowServiceImpl.isWithinRange(new Date(1000L), start, end));
+        assertTrue(BPWorkFlowServiceImpl.isWithinRange(new Date(2000L), start, end));
+        assertTrue(BPWorkFlowServiceImpl.isWithinRange(new Date(1500L), start, end));
+        assertFalse(BPWorkFlowServiceImpl.isWithinRange(new Date(500L), start, end));
+        assertFalse(BPWorkFlowServiceImpl.isWithinRange(new Date(2500L), start, end));
+    }
+
+    @Test
+    void testEnrolBPWorkFlow_volunteerNotEligible_returnsNotAcceptable() {
+        wfRequest = getRequest();
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD),
+                eq(Constants.TABLE_USER_ROLES),
+                eq(Collections.singletonMap(Constants.USER_ID, wfRequest.getUserId())),
+                eq(Arrays.asList(Constants.ROLE, Constants.USER_ID)),
+                isNull()
+        )).thenReturn(Map.of(Constants.RESPONSE, List.of(Map.of(Constants.ROLE, Constants.ROLE_VOLUNTEER))));
+
+        ReflectionTestUtils.setField(bpWorkFlowService, "orgeligibilityIndex", "org_elig_index");
+        ReflectionTestUtils.setField(bpWorkFlowService, "orgeligibilityIndexType", "_doc");
+        when(elasticsearchServiceManager.readEntity(anyString(), anyString(), anyString())).thenReturn(Collections.emptyMap());
+
+        Response response = bpWorkFlowService.enrolBPWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.NOT_ACCEPTABLE, response.get(Constants.STATUS));
+        assertEquals(Constants.VOLUNTEER_NOT_ELIGIBLE_TO_ENROLL, response.get(Constants.ERROR_MESSAGE));
+    }
+
+    @Test
+    void testEnrolBPWorkFlow_scheduleConflict_returnsBadRequest() {
+        wfRequest = getRequest();
+
+        Map<String, Object> courseBatch = new HashMap<>();
+        courseBatch.put(Constants.BATCH_ATTRIBUTES, "{\"currentBatchSize\":\"50\"}");
+        courseBatch.put(Constants.START_DATE, Instant.now());
+        courseBatch.put(Constants.NAME, "Batch Name");
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(List.of(courseBatch));
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_ENROLMENT_BATCH_LOOKUP), anyMap(), anyList()))
+                .thenReturn(Collections.emptyList());
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD), eq(Constants.TABLE_USER_ROLES), anyMap(), anyList(), isNull()))
+                .thenReturn(Collections.emptyMap());
+        when(wfStatusRepo.findByApplicationId(any())).thenReturn(new ArrayList<>());
+
+        doReturn(true).when(bpWorkFlowService).scheduleConflictCheck(any());
+
+        Response response = bpWorkFlowService.enrolBPWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.get(Constants.STATUS));
+        assertTrue(response.get(Constants.ERROR_MESSAGE).toString().contains("schedule conflict"));
+    }
+
+    @Test
+    void testUpdateBPWorkFlow_scheduleConflict_rejectsAndReturnsBadRequest() {
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("batch123");
+        wfRequest.setCourseId("course456");
+        wfRequest.setAction("ENROLL");
+        wfRequest.setUserId("user-1");
+
+        Map<String, Object> courseBatch = new HashMap<>();
+        courseBatch.put(Constants.BATCH_ATTRIBUTES, "{\"currentBatchSize\":\"50\"}");
+        courseBatch.put(Constants.START_DATE, Instant.now().plus(5, ChronoUnit.DAYS));
+        courseBatch.put(Constants.NAME, "Batch A");
+
+        when(configuration.getBpBatchFullValidationExcludeStates()).thenReturn(Collections.singletonList("NONE"));
+        when(cassandraOperation.getRecordsByProperties(anyString(), anyString(), anyMap(), anyList()))
+                .thenReturn(List.of(courseBatch));
+        when(configuration.getConflictRejectReason()).thenReturn("Schedule conflict reason");
+        doReturn(true).when(bpWorkFlowService).scheduleConflictCheck(any());
+
+        Response response = bpWorkFlowService.updateBPWorkFlow("root", "org", wfRequest, "userId", "role");
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.get(Constants.STATUS));
+        assertEquals("Schedule conflict reason", response.get(Constants.ERROR_MESSAGE));
+        assertEquals(Constants.REJECT, wfRequest.getAction());
+        verify(workflowservice).workflowTransition("root", "org", wfRequest);
+    }
+
+    @Test
+    void testGetCurrentBatchAttributes_missingBatchAttributesKey_returnsEmptyMap() {
+        Map<String, Object> courseBatch = new HashMap<>();
+        courseBatch.put(Constants.NAME, "Batch Without Attributes");
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(List.of(courseBatch));
+
+        Map<String, Object> result = bpWorkFlowService.getCurrentBatchAttributes("batch1", "course1");
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testGetCurrentBatchAttributes_defaultsWhenAttributesIncomplete() {
+        Map<String, Object> courseBatch = new HashMap<>();
+        courseBatch.put(Constants.BATCH_ATTRIBUTES, "{}");
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(List.of(courseBatch));
+
+        Map<String, Object> result = bpWorkFlowService.getCurrentBatchAttributes("batch1", "course1");
+
+        assertEquals(0, result.get(Constants.CURRENT_BATCH_SIZE));
+        assertNull(result.get(Constants.ENROLMENT_END_DATE));
+        assertNull(result.get(Constants.START_DATE));
+        assertEquals("", result.get(Constants.BATCH_NAME));
+    }
+
+    @Test
+    void testUpdateEnrolmentDetails_nullResponse_logsNoResponseAndReverses() {
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("batch123");
+        wfRequest.setCourseId("course456");
+        wfRequest.setUserId("user789");
+        wfRequest.setServiceName(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+        wfRequest.setWfId("wf-99");
+
+        Map<String, Object> batchDetails = new HashMap<>();
+        batchDetails.put(Constants.BATCH_ATTRIBUTES, "{\"currentBatchSize\":\"10\"}");
+        batchDetails.put(Constants.START_DATE, Instant.now());
+        batchDetails.put(Constants.NAME, "Batch Name");
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(Collections.singletonList(batchDetails));
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_ENROLMENT_BATCH_LOOKUP), anyMap(), anyList()))
+                .thenReturn(List.of(Map.of("active", true)));
+        when(configuration.getCourseServiceHost()).thenReturn("http://localhost/");
+        when(configuration.getAdminBlendedProgramEnrolEndPoint()).thenReturn("enrol/blended");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any(HashMap.class)))
+                .thenReturn(null);
+        when(wfStatusRepo.findByApplicationIdAndWfId("batch123", "wf-99")).thenReturn(null);
+
+        assertDoesNotThrow(() -> bpWorkFlowService.updateEnrolmentDetails(wfRequest));
+
+        verify(requestServiceImpl).fetchResultUsingPost(any(), any(), eq(Map.class), any(HashMap.class));
+    }
+
+    @Test
+    void testRemoveEnrolmentDetails_nullResponse_logsNoResponse() {
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("batch1");
+        wfRequest.setCourseId("course1");
+        wfRequest.setUserId("user1");
+
+        when(configuration.getCourseServiceHost()).thenReturn("http://localhost/");
+        when(configuration.getAdminUnEnrolEndPoint()).thenReturn("/unenroll");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any(HashMap.class)))
+                .thenReturn(null);
+
+        assertDoesNotThrow(() -> bpWorkFlowService.removeEnrolmentDetails(wfRequest));
+
+        verify(requestServiceImpl).fetchResultUsingPost(any(), any(), eq(Map.class), any(HashMap.class));
+    }
+
+    @Test
+    void testRemoveBPWorkFlow_currentBehavior_throwsOnBatchStartDateConversion() {
+        // NOTE: courseBatchDetails returned by getCurrentBatchAttributes stores START_DATE as a
+        // java.util.Date (see buildBatchAttributesResult), but removeBPWorkFlow casts that same
+        // value to java.time.Instant. This looks like a pre-existing bug independent of this
+        // coverage pass; documenting the current (crashing) behavior rather than changing it.
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("app1");
+        wfRequest.setCourseId("course1");
+        wfRequest.setUserId("user1");
+        wfRequest.setState("APPROVED");
+
+        when(wfStatusRepo.findByApplicationIdAndUserIdAndCurrentStatus(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        assertThrows(NullPointerException.class,
+                () -> bpWorkFlowService.removeBPWorkFlow("root", "org", wfRequest, "userId", "role"));
+    }
+
+    @Test
+    void testScheduleConflictCheck_detectsStartDateConflict() {
+        WfRequest req = new WfRequest();
+        req.setUserId("user1");
+        req.setCourseId("course1");
+        req.setApplicationId("batch1");
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.USER_ENROLMENTS_V2), anyMap(), anyList()))
+                .thenReturn(List.of(Map.of(Constants.ACTIVE, true, Constants.COURSE_ID, "other-course", Constants.BATCH_ID, "other-batch")));
+
+        Instant newStart = Instant.now();
+        Instant newEnd = Instant.now().plusSeconds(86400);
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(List.of(Map.of(Constants.START_DATE, newStart, Constants.END_DATE, newEnd)))
+                .thenReturn(List.of(Map.of(
+                        Constants.START_DATE, newStart.plusSeconds(1800),
+                        Constants.END_DATE, newEnd.plusSeconds(1800))));
+
+        boolean conflict = bpWorkFlowService.scheduleConflictCheck(req);
+
+        assertTrue(conflict);
+    }
+
+    @Test
+    void testScheduleConflictCheck_noOverlap_returnsFalse() {
+        WfRequest req = new WfRequest();
+        req.setUserId("user1");
+        req.setCourseId("course1");
+        req.setApplicationId("batch1");
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.USER_ENROLMENTS_V2), anyMap(), anyList()))
+                .thenReturn(Collections.emptyList());
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(Collections.emptyList());
+
+        boolean conflict = bpWorkFlowService.scheduleConflictCheck(req);
+
+        assertFalse(conflict);
+    }
+
+    @Test
+    void testEnrollmentDateValidations_endDateWithinRange_returnsTrue() {
+        Date[] rangeStart = {new Date(1000L)};
+        Date[] rangeEnd = {new Date(5000L)};
+        List<Map<String, Object>> enrolled = List.of(Map.of(
+                Constants.START_DATE, Instant.ofEpochMilli(100L),
+                Constants.END_DATE, Instant.ofEpochMilli(3000L)
+        ));
+
+        boolean result = bpWorkFlowService.enrollmentDateValidations(enrolled, rangeStart, rangeEnd);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testEnrollmentDateValidations_noOverlap_returnsFalse() {
+        Date[] rangeStart = {new Date(1000L)};
+        Date[] rangeEnd = {new Date(2000L)};
+        List<Map<String, Object>> enrolled = List.of(Map.of(
+                Constants.START_DATE, Instant.ofEpochMilli(5000L),
+                Constants.END_DATE, Instant.ofEpochMilli(6000L)
+        ));
+
+        boolean result = bpWorkFlowService.enrollmentDateValidations(enrolled, rangeStart, rangeEnd);
+
+        assertFalse(result);
+    }
+
+    @Test
+    void testGetCourseBatchDetails_withCourseAndBatchIds_returnsFilteredList() {
+        List<Map<String, Object>> userEnrollmentBatchDetailsList = List.of(
+                Map.of(Constants.COURSE_ID, "course1", Constants.BATCH_ID, "batch1")
+        );
+        List<Map<String, Object>> cassandraResult = List.of(Map.of("end_date", Instant.now()));
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(cassandraResult);
+
+        List<Map<String, Object>> result = bpWorkFlowService.getCourseBatchDetails(userEnrollmentBatchDetailsList);
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void testGetCourseBatchDetails_emptyInput_returnsEmptyList() {
+        List<Map<String, Object>> result = bpWorkFlowService.getCourseBatchDetails(Collections.emptyList());
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testGetTotalUserEnrolCountForBatch_filtersExcludedStates() {
+        WfStatusEntity included = new WfStatusEntity();
+        included.setCurrentStatus("ENROLL_IS_IN_PROGRESS");
+        WfStatusEntity excluded = new WfStatusEntity();
+        excluded.setCurrentStatus("WITHDRAWN");
+
+        when(wfStatusRepo.findByApplicationId("app1")).thenReturn(List.of(included, excluded));
+        when(configuration.getBpBatchFullValidationExcludeStates()).thenReturn(List.of("WITHDRAWN"));
+
+        int count = bpWorkFlowService.getTotalUserEnrolCountForBatch("app1");
+
+        assertEquals(1, count);
+    }
+
+    @Test
+    void testProcessWFRequest_enrollInProgress_success() throws Exception {
+        wfRequest = new WfRequest();
+        wfRequest.setWfId("wf1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setCourseId("course1");
+        wfRequest.setServiceName("svc1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setDeptName("dept");
+        wfRequest.setComment("comment");
+        wfRequest.setUpdateFieldValues(new ArrayList<>());
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setWfId("wf1");
+        wfStatusEntity.setCurrentStatus(Constants.ENROLL_IS_IN_PROGRESS);
+
+        when(wfStatusRepo.findByWfId("wf1")).thenReturn(wfStatusEntity);
+        when(contentReadService.getServiceNameDetails("course1")).thenReturn(null);
+
+        WfAction action = new WfAction();
+        action.setAction("APPROVE");
+        action.setNextState("APPROVED");
+
+        WfStatus currentState = new WfStatus();
+        currentState.setState(Constants.ENROLL_IS_IN_PROGRESS);
+        currentState.setActions(List.of(action));
+
+        WfStatus nextState = new WfStatus();
+        nextState.setState("APPROVED");
+        nextState.setIsLastState(true);
+
+        WorkFlowModel model = new WorkFlowModel();
+        model.setWfstates(List.of(currentState, nextState));
+
+        doReturn(model).when(bpWorkFlowService).getWorkFlowConfig("svc1");
+        when(configuration.getWorkflowApplicationTopic()).thenReturn("app-topic");
+        when(configuration.getWorkFlowNotificationTopic()).thenReturn("notif-topic");
+
+        bpWorkFlowService.processWFRequest(wfRequest);
+
+        assertEquals("APPROVED", wfStatusEntity.getCurrentStatus());
+        verify(wfStatusRepo).save(wfStatusEntity);
+        verify(producer).push("app-topic", wfRequest);
+        verify(producer).push("notif-topic", wfRequest);
+    }
+
+    @Test
+    void testProcessWFRequest_unknownCurrentState_isSkippedWithoutException() {
+        wfRequest = new WfRequest();
+        wfRequest.setWfId("wf1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setCourseId("course1");
+        wfRequest.setServiceName("svc1");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setWfId("wf1");
+        wfStatusEntity.setCurrentStatus("SOME_UNKNOWN_STATE");
+
+        when(wfStatusRepo.findByWfId("wf1")).thenReturn(wfStatusEntity);
+
+        assertDoesNotThrow(() -> bpWorkFlowService.processWFRequest(wfRequest));
+    }
+
+    @Test
+    void testProcessWFRequest_approvalState_success() throws Exception {
+        wfRequest = new WfRequest();
+        wfRequest.setWfId("wf2");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName("svc-approval");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setDeptName("dept");
+        wfRequest.setComment("comment");
+        wfRequest.setUpdateFieldValues(new ArrayList<>());
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setWfId("wf2");
+        wfStatusEntity.setCurrentStatus(Constants.ONE_STEP_PC_APPROVAL);
+
+        when(wfStatusRepo.findByWfId("wf2")).thenReturn(wfStatusEntity);
+
+        WfAction action = new WfAction();
+        action.setAction("APPROVE");
+        action.setNextState("APPROVED");
+
+        WfStatus currentState = new WfStatus();
+        currentState.setState(Constants.ONE_STEP_PC_APPROVAL);
+        currentState.setActions(List.of(action));
+
+        WfStatus nextState = new WfStatus();
+        nextState.setState("APPROVED");
+        nextState.setIsLastState(false);
+
+        WorkFlowModel model = new WorkFlowModel();
+        model.setWfstates(List.of(currentState, nextState));
+
+        doReturn(model).when(bpWorkFlowService).getWorkFlowConfig("svc-approval");
+        when(configuration.getWorkflowApplicationTopic()).thenReturn("app-topic");
+        when(configuration.getWorkFlowNotificationTopic()).thenReturn("notif-topic");
+
+        bpWorkFlowService.processWFRequest(wfRequest);
+
+        assertEquals("APPROVED", wfStatusEntity.getCurrentStatus());
+        assertTrue(wfStatusEntity.getInWorkflow());
+        verify(wfStatusRepo).save(wfStatusEntity);
+        verify(producer).push("app-topic", wfRequest);
+        verify(producer).push("notif-topic", wfRequest);
+    }
+
+    @Test
+    void testGenerateUserApprovalCsv_noDataFound_returnsNotFound() {
+        SearchCriteria criteria = new SearchCriteria();
+        mockResponse = new Response();
+        mockResponse.put(Constants.DATA, null);
+
+        when(workflowservice.applicationsSearch(any(), any(), any(), any())).thenReturn(mockResponse);
+
+        ResponseEntity<ByteArrayResource> response = bpWorkFlowService.generateUserApprovalCsv(criteria);
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertTrue(new String(response.getBody().getByteArray()).contains("No data found"));
     }
 
 }
