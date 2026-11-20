@@ -13,6 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -64,6 +65,12 @@ class WorkflowServiceImplPrivateMethodTest {
 
     @Mock
     UserUtil userUtil;
+
+    @Mock
+    org.sunbird.workflow.utils.CassandraOperation cassandraOperation;
+
+    @Mock
+    org.sunbird.workflow.producer.Producer producer;
 
     @BeforeEach
     void setup() {
@@ -852,6 +859,235 @@ void testHandleProfileServiceWorkflow_requestExists() {
                 "userProfileRead", "user1");
 
         assertEquals(Collections.emptyMap(), result);
+    }
+
+    @Test
+    void testResolveRequestKeyAndDeptName_neitherNameNorGroupNorDesignation_returnsNullRequestKey() {
+        WfRequest wfRequest = new WfRequest();
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of("other", "val")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field)));
+
+        Object result = ReflectionTestUtils.invokeMethod(workflowService, "resolveRequestKeyAndDeptName", wfRequest);
+
+        assertNull(ReflectionTestUtils.invokeMethod(result, "requestKey"));
+        assertNull(ReflectionTestUtils.invokeMethod(result, "doptName"));
+    }
+
+    @Test
+    void testUpdatePreviousRootOrgIdOnNameChange_fieldKeyNotName_skipsCassandraLookup() {
+        WfRequest wfRequest = new WfRequest();
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.GROUP, "eng")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field)));
+
+        ReflectionTestUtils.invokeMethod(workflowService, "updatePreviousRootOrgIdOnNameChange", wfRequest);
+
+        assertNull(wfRequest.getPreviousRootOrgId());
+        verifyNoInteractions(cassandraOperation);
+    }
+
+    @Test
+    void testUpdatePreviousRootOrgIdOnNameChange_nameField_emptyUserDetails_setsNullRootOrgId() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("app1");
+        HashMap<String, Object> field = new HashMap<>();
+        field.put(Constants.TO_VALUE, new HashMap<>(Map.of(Constants.NAME, "newName")));
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(field)));
+
+        when(cassandraOperation.getRecordsByProperties(any(), any(), any(), any())).thenReturn(Collections.emptyList());
+
+        ReflectionTestUtils.invokeMethod(workflowService, "updatePreviousRootOrgIdOnNameChange", wfRequest);
+
+        assertNull(wfRequest.getPreviousRootOrgId());
+    }
+
+    @Test
+    void testPushWorkflowNotificationEvents_aiAssessment_neitherPendingNorRejected_noPush() {
+        WfRequest wfRequest = new WfRequest();
+        applicationStatus.setServiceName(Constants.AI_ASSESSMENT_SERVICE_NAME);
+        applicationStatus.setCurrentStatus("APPROVED");
+
+        ReflectionTestUtils.invokeMethod(workflowService, "pushWorkflowNotificationEvents", wfRequest, applicationStatus);
+
+        verifyNoInteractions(producer);
+    }
+
+    @Test
+    void testPushWorkflowNotificationEvents_aiAssessment_rejected_pushes() {
+        WfRequest wfRequest = new WfRequest();
+        applicationStatus.setServiceName(Constants.AI_ASSESSMENT_SERVICE_NAME);
+        applicationStatus.setCurrentStatus(Constants.REJECTED);
+
+        when(configuration.getWorkFlowNotificationTopic()).thenReturn("notif-topic");
+
+        ReflectionTestUtils.invokeMethod(workflowService, "pushWorkflowNotificationEvents", wfRequest, applicationStatus);
+
+        verify(producer, times(1)).push("notif-topic", wfRequest);
+    }
+
+    @Test
+    void testGetDepartmentDetails_emptyDepartmentName_returnsEmptyString() {
+        HashMap<String, Object> updatedDeptValue = new HashMap<>();
+        HashMap<String, String> toValue = new HashMap<>();
+        toValue.put("departmentName", "");
+        updatedDeptValue.put(Constants.TO_VALUE, toValue);
+
+        String result = ReflectionTestUtils.invokeMethod(workflowService, "getDepartmentDetails", updatedDeptValue);
+
+        assertEquals("", result);
+    }
+
+    @Test
+    void testIsRootOrgRequiredButMissing_rootOrgBlank_designationChangeOnly_returnsTrue() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setRequestType(List.of(Constants.DESIGNATION_CHANGE));
+
+        boolean result = ReflectionTestUtils.invokeMethod(workflowService, "isRootOrgRequiredButMissing", "", criteria);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testGetPageReqForApplicationSearch_offsetNull_defaultsOffsetAndForcesMaxLimit() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setLimit(10);
+        criteria.setOffset(null);
+        when(configuration.getDefaultOffset()).thenReturn(0);
+        when(configuration.getMaxLimit()).thenReturn(50);
+
+        Pageable pageable = ReflectionTestUtils.invokeMethod(workflowService, "getPageReqForApplicationSearch", criteria);
+
+        assertEquals(0, pageable.getPageNumber());
+        assertEquals(50, pageable.getPageSize());
+    }
+
+    @Test
+    void testGetPageReqForApplicationSearch_limitNull_usesDefaultLimit() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setLimit(null);
+        criteria.setOffset(5);
+        when(configuration.getDefaultLimit()).thenReturn(20);
+
+        Pageable pageable = ReflectionTestUtils.invokeMethod(workflowService, "getPageReqForApplicationSearch", criteria);
+
+        assertEquals(5, pageable.getPageNumber());
+        assertEquals(20, pageable.getPageSize());
+    }
+
+    @Test
+    void testGetPageReqForApplicationSearch_limitWithinMax_notCapped() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName("svc");
+        criteria.setLimit(5);
+        criteria.setOffset(2);
+        when(configuration.getMaxLimit()).thenReturn(50);
+
+        Pageable pageable = ReflectionTestUtils.invokeMethod(workflowService, "getPageReqForApplicationSearch", criteria);
+
+        assertEquals(5, pageable.getPageSize());
+    }
+
+    @Test
+    void testBuildInfosMap_blendedProgram_userIdBlank_noFiltering() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+        WfStatusEntity e1 = new WfStatusEntity();
+        e1.setUserId("u1");
+        WfStatusEntity e2 = new WfStatusEntity();
+        e2.setUserId("u2");
+
+        Map<String, List<WfStatusEntity>> result = ReflectionTestUtils.invokeMethod(
+                workflowService, "buildInfosMap", criteria, List.of(e1, e2));
+
+        assertEquals(2, result.size());
+    }
+
+    @Test
+    void testBuildInfosMap_blendedProgram_userIdPresentButNoMatch_clearsInfos() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setServiceName(Constants.BLENDED_PROGRAM_SERVICE_NAME);
+        criteria.setUserId("missingUser");
+        WfStatusEntity e1 = new WfStatusEntity();
+        e1.setUserId("u1");
+
+        Map<String, List<WfStatusEntity>> result = ReflectionTestUtils.invokeMethod(
+                workflowService, "buildInfosMap", criteria, List.of(e1));
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testTriggerCommunityModeratorEventIfApplicable_nullUpdateResponse_noPush() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        applicationStatus.setRequestType(Constants.ORG_TRANSFER_REQUEST);
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), isNull())).thenReturn(null);
+
+        ReflectionTestUtils.invokeMethod(workflowService, "triggerCommunityModeratorEventIfApplicable", wfRequest, applicationStatus);
+
+        verifyNoInteractions(producer);
+    }
+
+    @Test
+    void testSendNotification_name_rejectAction_sendsTransferUpdateNotification() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        wfRequest.setRootOrgId("rootOrg1");
+        wfRequest.setAction(Constants.REJECT);
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(
+                Map.of("result", Map.of("response", Map.of("content", List.of(Map.of("userId", "leader1"))))));
+        when(userUtil.userProfileRead(any())).thenReturn(Collections.emptyMap());
+
+        ReflectionTestUtils.invokeMethod(workflowService, "sendNotification", "name", "dept", wfRequest);
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.TRANSFER_UPDATE), eq(Constants.UPDATE), any(), any(), any());
+    }
+
+    @Test
+    void testSendNotification_name_profileDetailsEmpty_skipsTitlePlaceholder() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        wfRequest.setRootOrgId("rootOrg1");
+        wfRequest.setAction("approve");
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(
+                Map.of("result", Map.of("response", Map.of("content", List.of(Map.of("userId", "leader1"))))));
+        when(userUtil.userProfileRead(any())).thenReturn(Map.of(Constants.FIRST_NAME_CAMEL_CASE, "John Doe"));
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workflowService, "sendNotification", "name", "dept", wfRequest));
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.USER_TRANSFER), eq(Constants.ALERT), any(), any(), any());
+    }
+
+    @Test
+    void testSendNotification_name_employmentDetailsEmpty_skipsTitlePlaceholder() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user1");
+        wfRequest.setRootOrgId("rootOrg1");
+        wfRequest.setAction("approve");
+
+        when(configuration.getLmsServiceHost()).thenReturn("http://host/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("/search");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(
+                Map.of("result", Map.of("response", Map.of("content", List.of(Map.of("userId", "leader1"))))));
+        when(userUtil.userProfileRead(any())).thenReturn(Map.of(
+                Constants.FIRST_NAME_CAMEL_CASE, "John Doe",
+                Constants.PROFILE_DETAILS, Map.of("someOtherField", "x")));
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(workflowService, "sendNotification", "name", "dept", wfRequest));
+
+        verify(notificationTriggerService).triggerNotification(eq(Constants.USER_TRANSFER), eq(Constants.ALERT), any(), any(), any());
     }
 
     private WfRequest buildValidRequest() {

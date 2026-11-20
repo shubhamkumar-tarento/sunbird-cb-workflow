@@ -21,7 +21,6 @@ import org.springframework.web.multipart.MultipartFile;
 import org.sunbird.workflow.config.Configuration;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.exception.ApplicationException;
-import org.sunbird.workflow.exception.BadRequestException;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;
@@ -208,6 +207,75 @@ class BPWorkFlowServiceImplTest {
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         SBApiResponse body = (SBApiResponse) response.getBody();
         assertEquals("FAILED", body.getParams().getStatus());
+    }
+
+    @Test
+    void testLoadApprovalDataFromCsv_missingWorkflow_recordedAndSkipped() throws Exception {
+        String csvContent =
+                "email,userName,wfId,userId,action(approve/reject)\n" +
+                        "missing.user@yopmail.com,Missing User,missing-wf-id,user-missing,approve";
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "approval_data.csv", "text/csv", csvContent.getBytes(StandardCharsets.UTF_8));
+
+        when(wfStatusRepo.findByWfId("missing-wf-id")).thenReturn(null);
+
+        ResponseEntity<?> response = bpWorkFlowService.loadApprovalDataFromCsv(file, "content123");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(wfStatusRepo).findByWfId("missing-wf-id");
+    }
+
+    @Test
+    void testLoadApprovalDataFromCsv_rowProcessedSuccessfully_mdoApprovalRole() throws Exception {
+        String csvContent =
+                "email,userName,wfId,userId,action(approve/reject)\n" +
+                        "row.user@yopmail.com,Row User,wf-row-1,user-row-1,approve";
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "approval_data.csv", "text/csv", csvContent.getBytes(StandardCharsets.UTF_8));
+
+        WfStatusEntity wfStatus = new WfStatusEntity();
+        wfStatus.setWfId("wf-row-1");
+        wfStatus.setCurrentStatus(Constants.SEND_FOR_MDO_APPROVAL);
+        wfStatus.setUpdateFieldValues("[]");
+        when(wfStatusRepo.findByWfId("wf-row-1")).thenReturn(wfStatus);
+
+        Response updateResp = new Response();
+        updateResp.put(Constants.STATUS, "OK");
+        Map<String, Object> data = new HashMap<>();
+        data.put(Constants.STATUS, Constants.APPROVED_STATE);
+        updateResp.put(Constants.DATA, data);
+        doReturn(updateResp).when(bpWorkFlowService).updateBPWorkFlow(any(), any(), any(), any(), eq(Constants.MDO_ADMIN));
+
+        ResponseEntity<?> response = bpWorkFlowService.loadApprovalDataFromCsv(file, "content123");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(bpWorkFlowService).updateBPWorkFlow(any(), any(), any(), eq("user-row-1"), eq(Constants.MDO_ADMIN));
+    }
+
+    @Test
+    void testLoadApprovalDataFromCsv_rowProcessedSuccessfully_pcApprovalRole() throws Exception {
+        String csvContent =
+                "email,userName,wfId,userId,action(approve/reject)\n" +
+                        "row.user2@yopmail.com,Row User Two,wf-row-2,user-row-2,reject";
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "approval_data.csv", "text/csv", csvContent.getBytes(StandardCharsets.UTF_8));
+
+        WfStatusEntity wfStatus = new WfStatusEntity();
+        wfStatus.setWfId("wf-row-2");
+        wfStatus.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
+        wfStatus.setUpdateFieldValues("[]");
+        when(wfStatusRepo.findByWfId("wf-row-2")).thenReturn(wfStatus);
+
+        // Null result from updateBPWorkFlow exercises processRow's "invalid response" branch.
+        doReturn(null).when(bpWorkFlowService).updateBPWorkFlow(any(), any(), any(), any(), eq(Constants.PROGRAM_COORDINATOR));
+
+        ResponseEntity<?> response = bpWorkFlowService.loadApprovalDataFromCsv(file, "content123");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(bpWorkFlowService).updateBPWorkFlow(any(), any(), any(), eq("user-row-2"), eq(Constants.PROGRAM_COORDINATOR));
     }
 
     private WfRequest getRequest() {
@@ -792,7 +860,7 @@ class BPWorkFlowServiceImplTest {
         Map<String, Object> enrolResp = new HashMap<>();
         enrolResp.put(Constants.RESPONSE_CODE, "OK");
 
-        when(requestServiceImpl.fetchResultUsingPost(new StringBuilder(anyString()), any(), eq(Map.class), any(HashMap.class)))
+        when(requestServiceImpl.fetchResultUsingPost(any(StringBuilder.class), any(), eq(Map.class), any(HashMap.class)))
                 .thenReturn(enrolResp);
 
         assertDoesNotThrow(()-> bpWorkFlowService.removeEnrolmentDetails(wfRequest));
@@ -816,7 +884,7 @@ class BPWorkFlowServiceImplTest {
         failResp.put(Constants.RESPONSE_CODE, "FAIL");
         failResp.put(Constants.PARAMS, param);
 
-        when(requestServiceImpl.fetchResultUsingPost(new StringBuilder(anyString()), any(), eq(Map.class), any(HashMap.class)))
+        when(requestServiceImpl.fetchResultUsingPost(any(StringBuilder.class), any(), eq(Map.class), any(HashMap.class)))
                 .thenReturn(failResp);
 
         assertDoesNotThrow(()-> bpWorkFlowService.removeEnrolmentDetails(wfRequest));
@@ -832,7 +900,7 @@ class BPWorkFlowServiceImplTest {
         when(configuration.getCourseServiceHost()).thenReturn("http://localhost/");
         when(configuration.getAdminUnEnrolEndPoint()).thenReturn("/unenroll");
 
-        when(requestServiceImpl.fetchResultUsingPost(new StringBuilder(anyString()), any(), eq(Map.class), any(HashMap.class)))
+        when(requestServiceImpl.fetchResultUsingPost(any(StringBuilder.class), any(), eq(Map.class), any(HashMap.class)))
                 .thenThrow(new RuntimeException("Failure"));
 
         assertDoesNotThrow(()->bpWorkFlowService.removeEnrolmentDetails(wfRequest));
@@ -844,6 +912,19 @@ class BPWorkFlowServiceImplTest {
 
         Response response = bpWorkFlowService.readStats(input);
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getResponseCode());
+    }
+
+    @Test
+    void testReadStats_invalidRequest_nullRequestBody_returnsBadRequest() {
+        Map<String, Object> input = new HashMap<>();
+        input.put(Constants.REQUEST, null);
+
+        Response response = bpWorkFlowService.readStats(input);
+
+        assertEquals(Constants.FAILED, response.get(Constants.MESSAGE));
+        assertEquals("Invalid Request", response.get(Constants.ERROR_MESSAGE));
+        assertEquals(HttpStatus.BAD_REQUEST, response.get(Constants.STATUS));
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
     }
 
     @Test
@@ -919,6 +1000,56 @@ class BPWorkFlowServiceImplTest {
 
         assertEquals(HttpStatus.OK, response.getResponseCode());
         assertEquals(0, response.getResult().get(Constants.COUNT));
+    }
+
+    @Test
+    void testReadStats_batchMissingEndDate_currentBehaviorThrowsAndIsCaught() {
+        Map<String, Object> requestBody = Map.of(Constants.COURSE_ID_LIST, List.of(COURSE_ID));
+        Map<String, Object> input = Map.of(Constants.REQUEST, requestBody);
+
+        // No END_DATE key present -> endDate resolves to null, and the current implementation
+        // calls todayDate.after(null), which throws NullPointerException. This is caught by
+        // readStats' own outer try/catch, documenting current (buggy) behavior rather than fixing it.
+        Map<String, Object> courseBatch = new HashMap<>();
+        courseBatch.put(Constants.COURSE_ID_KEY, COURSE_ID);
+        courseBatch.put(Constants.BATCH_ID_KEY, BATCH_ID);
+
+        when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
+                .thenReturn(List.of(courseBatch));
+
+        Response response = bpWorkFlowService.readStats(input);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getResponseCode());
+    }
+
+    @Test
+    void testReadStats_sameCourseIdTwice_mergesIntoSingleCourseBatchEntry() {
+        Map<String, Object> requestBody = Map.of(Constants.COURSE_ID_LIST, List.of(COURSE_ID));
+        Map<String, Object> input = Map.of(Constants.REQUEST, requestBody);
+
+        Instant futureDate = Instant.now().plusSeconds(86400);
+        Map<String, Object> batchOne = new HashMap<>();
+        batchOne.put(Constants.END_DATE, futureDate);
+        batchOne.put(Constants.COURSE_ID_KEY, COURSE_ID);
+        batchOne.put(Constants.BATCH_ID_KEY, "batch-one");
+
+        Map<String, Object> batchTwo = new HashMap<>();
+        batchTwo.put(Constants.END_DATE, futureDate);
+        batchTwo.put(Constants.COURSE_ID_KEY, COURSE_ID);
+        batchTwo.put(Constants.BATCH_ID_KEY, "batch-two");
+
+        when(cassandraOperation.getRecordsByProperties(
+                eq(Constants.KEYSPACE_SUNBIRD_COURSES), eq(Constants.TABLE_COURSE_BATCH), anyMap(), anyList()))
+                .thenReturn(List.of(batchOne, batchTwo));
+        when(wfStatusRepo.findByServiceNameAndApplicationId(eq(Constants.BLENDED_PROGRAM_SERVICE_NAME), anyString()))
+                .thenReturn(Collections.emptyList());
+
+        Response response = bpWorkFlowService.readStats(input);
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        // Both batches share the same courseId, so the second pass must merge into the
+        // already-created course entry rather than creating a new one.
+        assertEquals(1, response.getResult().get(Constants.COUNT));
     }
 
     @Test
@@ -1067,6 +1198,32 @@ class BPWorkFlowServiceImplTest {
 
         assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
         assertTrue(response.get(Constants.MESSAGE).toString().contains("Not allowed to enroll"));
+    }
+
+    @Test
+    void testAdminEnrolBPWorkFlow_success_newEnrollment() throws Exception {
+        WfRequest req = getSampleRequest();
+        req.setState("INITIAL");
+
+        Map<String, Object> batchAttr = Map.of(Constants.BATCH_ATTRIBUTES, "{\"currentBatchSize\":\"10\"}",
+                Constants.START_DATE, Instant.now(), Constants.ENROLMENT_END_DATE, Instant.now().plusSeconds(3600),
+                Constants.NAME, "Test Batch");
+        when(cassandraOperation.getRecordsByProperties(any(), any(), anyMap(), anyList()))
+                .thenReturn(List.of(batchAttr));
+        when(wfStatusRepo.findByApplicationId(any())).thenReturn(List.of());
+        when(configuration.getBpBatchEnrolLimitBufferSize()).thenReturn(20);
+        // No existing enrollment for this user -> should proceed into the "new enrollment" branch.
+        when(wfStatusRepo.findByServiceNameAndUserIdAndApplicationId(any(), any(), any())).thenReturn(List.of());
+        when(configuration.getWorkflowApplicationTopic()).thenReturn("wf-topic");
+        when(mapper.writeValueAsString(any())).thenReturn("[]");
+
+        Response response = bpWorkFlowService.adminEnrolBPWorkFlow(ROOT_ORG, ORG, req);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        assertTrue(req.isNominatedByMdo());
+        assertEquals(Constants.INITIATE, req.getAction());
+        verify(producer).push(eq("wf-topic"), any());
+        verify(wfStatusRepo).save(any(WfStatusEntity.class));
     }
 
     @Test
@@ -1472,6 +1629,88 @@ class BPWorkFlowServiceImplTest {
         assertEquals("You do not have permission to nominate users", resp.get(Constants.ERROR_MESSAGE));
     }
 
+    private Map<String, Object> actorProfileWithRole(String... roles) {
+        Map<String, Object> org = new HashMap<>();
+        org.put(Constants.ROLES, List.of(roles));
+        Map<String, Object> profile = new HashMap<>();
+        profile.put(Constants.ORGANISATIONS, List.of(org));
+        return profile;
+    }
+
+    @Test
+    void testNominateUsers_success_oneStepMdoApproval_fullHappyPath() throws Exception {
+        String userId = "user-success-1";
+        Map<String, Object> request = buildRequest("course-success", "batch-success", List.of(userId), "Dept Success");
+
+        when(contentReadService.getServiceNameDetails("course-success"))
+                .thenReturn(Map.of("wfApprovalType", Constants.ONE_STEP_MDO_APPROVAL, "primaryCategory", "Course"));
+        when(userUtils.userProfileRead("actor-success")).thenReturn(actorProfileWithRole(Constants.PROGRAM_COORDINATOR));
+
+        // One pre-existing active workflow with a blank actorUUID -> treated as SELF, and PC always
+        // overrides SELF, so it gets superseded (not blocking) and processing continues.
+        WfStatusEntity existingSelfRequest = new WfStatusEntity();
+        existingSelfRequest.setWfId("existing-wf-1");
+        when(wfStatusRepo.findActiveWorkflows("batch-success", userId, Boolean.TRUE))
+                .thenReturn(List.of(existingSelfRequest));
+
+        Map<String, Object> batchDetails = new HashMap<>();
+        batchDetails.put(Constants.CURRENT_BATCH_SIZE, 10);
+        batchDetails.put(Constants.START_DATE, Date.from(Instant.now().plusSeconds(3600)));
+        batchDetails.put(Constants.BATCH_NAME, "Batch Success");
+        doReturn(batchDetails).when(bpWorkFlowService).getCurrentBatchAttributes(any(), any());
+        doReturn(0).when(bpWorkFlowService).getTotalApprovedUserCount(any());
+        when(configuration.getBpBatchFullValidationExcludeStates()).thenReturn(List.of());
+
+        doReturn(Collections.emptyList()).when(bpWorkFlowService).getActiveEnrollmentForUserAndCourse(any(), any());
+        doReturn(false).when(bpWorkFlowService).scheduleConflictCheck(any());
+
+        when(mapper.writeValueAsString(any())).thenReturn("[]");
+        WfStatusEntity saved = new WfStatusEntity();
+        saved.setWfId("new-wf-id");
+        when(wfStatusRepo.save(any(WfStatusEntity.class))).thenReturn(saved);
+        when(configuration.getWorkFlowNotificationTopic()).thenReturn("notif-topic");
+        when(configuration.getWorkflowApplicationTopic()).thenReturn("app-topic");
+
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-success", request).getResult();
+
+        assertEquals(HttpStatus.OK, resp.get(Constants.STATUS));
+        List<?> data = (List<?>) resp.get(Constants.DATA);
+        Map<?, ?> userResp = (Map<?, ?>) data.get(0);
+        assertEquals(Constants.APPROVED, userResp.get("status"));
+        assertEquals("new-wf-id", userResp.get("wfId"));
+        assertEquals("WITHDRAWN", existingSelfRequest.getCurrentStatus());
+        verify(wfStatusRepo).save(existingSelfRequest);
+        verify(producer).push(eq("notif-topic"), any());
+        verify(producer).push(eq("app-topic"), any());
+    }
+
+    @Test
+    void testNominateUsers_blockedByExistingActiveWorkflow_sameRole_returnsAlreadyExists() {
+        String userId = "user-blocked-1";
+        Map<String, Object> request = buildRequest("course-blocked", "batch-blocked", List.of(userId), "Dept Blocked");
+
+        when(contentReadService.getServiceNameDetails("course-blocked"))
+                .thenReturn(Map.of("wfApprovalType", Constants.ONE_STEP_PC_APPROVAL, "primaryCategory", "Course"));
+        when(userUtils.userProfileRead("actor-blocked")).thenReturn(actorProfileWithRole(Constants.PROGRAM_COORDINATOR));
+
+        WfStatusEntity existingPcRequest = new WfStatusEntity();
+        existingPcRequest.setWfId("existing-wf-2");
+        existingPcRequest.setActorUUID("creator-1");
+        when(wfStatusRepo.findActiveWorkflows("batch-blocked", userId, Boolean.TRUE))
+                .thenReturn(List.of(existingPcRequest));
+        // The existing request's creator also has the PC role -> shouldOverride(PC, PC) is false,
+        // so this nomination should be blocked rather than superseding the existing one.
+        when(userUtils.userProfileRead("creator-1")).thenReturn(actorProfileWithRole(Constants.PROGRAM_COORDINATOR));
+
+        Map<?, ?> resp = bpWorkFlowService.nominateUsers(root, ORG, "actor-blocked", request).getResult();
+
+        assertEquals(HttpStatus.OK, resp.get(Constants.STATUS));
+        List<?> data = (List<?>) resp.get(Constants.DATA);
+        Map<?, ?> userResp = (Map<?, ?>) data.get(0);
+        assertEquals(Constants.ALREADY_EXISTS, userResp.get(Constants.STATUS));
+        verify(wfStatusRepo, never()).save(any(WfStatusEntity.class));
+    }
+
 
     @Test
     void testReverseApprovedRequest_updatesRequestAndPersistsEntity() {
@@ -1680,6 +1919,97 @@ class BPWorkFlowServiceImplTest {
     }
 
     @Test
+    void testRemoveBPWorkFlow_noApprovedLearners_proceedsPastBothBranches() {
+        // Stub getCurrentBatchAttributes (via the spy) to hand back START_DATE as an Instant
+        // directly, bypassing the pre-existing Date-vs-Instant bug documented above, purely so
+        // the rest of removeBPWorkFlow's branch logic (unrelated to that bug) can be exercised.
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("app1");
+        wfRequest.setCourseId("course1");
+        wfRequest.setUserId("user1");
+        wfRequest.setState("APPROVED");
+
+        Map<String, Object> batchDetails = new HashMap<>();
+        batchDetails.put(Constants.CURRENT_BATCH_SIZE, 10);
+        batchDetails.put(Constants.BATCH_NAME, "Batch X");
+        batchDetails.put(Constants.START_DATE, Instant.now());
+        doReturn(batchDetails).when(bpWorkFlowService).getCurrentBatchAttributes(any(), any());
+        doReturn(0).when(bpWorkFlowService).getTotalApprovedUserCount(any());
+
+        when(wfStatusRepo.findByApplicationIdAndUserIdAndCurrentStatus(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        Response txResponse = new Response();
+        when(workflowservice.workflowTransition(any(), any(), any(), any(), any())).thenReturn(txResponse);
+
+        Response response = bpWorkFlowService.removeBPWorkFlow("root", "org", wfRequest, "userId", "role");
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        assertNull(wfRequest.getWfId());
+    }
+
+    @Test
+    void testRemoveBPWorkFlow_exactlyOneApprovedLearner_setsWfIdFromIt() {
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("app1");
+        wfRequest.setCourseId("course1");
+        wfRequest.setUserId("user1");
+        wfRequest.setState("APPROVED");
+
+        Map<String, Object> batchDetails = new HashMap<>();
+        batchDetails.put(Constants.CURRENT_BATCH_SIZE, 10);
+        batchDetails.put(Constants.BATCH_NAME, "Batch X");
+        batchDetails.put(Constants.START_DATE, Instant.now());
+        doReturn(batchDetails).when(bpWorkFlowService).getCurrentBatchAttributes(any(), any());
+        doReturn(0).when(bpWorkFlowService).getTotalApprovedUserCount(any());
+
+        WfStatusEntity learner = new WfStatusEntity();
+        learner.setWfId("learner-wf-1");
+        when(wfStatusRepo.findByApplicationIdAndUserIdAndCurrentStatus(any(), any(), any()))
+                .thenReturn(List.of(learner));
+        Response txResponse = new Response();
+        when(workflowservice.workflowTransition(any(), any(), any(), any(), any())).thenReturn(txResponse);
+
+        Response response = bpWorkFlowService.removeBPWorkFlow("root", "org", wfRequest, "userId", "role");
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        assertEquals("learner-wf-1", wfRequest.getWfId());
+    }
+
+    @Test
+    void testRemoveBPWorkFlow_multipleApprovedLearnersWithEnrolAccess_setsErrorMessageButStillProceeds() {
+        wfRequest = new WfRequest();
+        wfRequest.setApplicationId("app1");
+        wfRequest.setCourseId("course1");
+        wfRequest.setUserId("user1");
+        wfRequest.setState("APPROVED");
+
+        Map<String, Object> batchDetails = new HashMap<>();
+        batchDetails.put(Constants.CURRENT_BATCH_SIZE, 10);
+        batchDetails.put(Constants.BATCH_NAME, "Batch X");
+        batchDetails.put(Constants.START_DATE, Instant.now());
+        doReturn(batchDetails).when(bpWorkFlowService).getCurrentBatchAttributes(any(), any());
+        // totalApprovedUserCount(0) < currentBatchSize(10) -> enrolAccess true, combined with >1 learners.
+        doReturn(0).when(bpWorkFlowService).getTotalApprovedUserCount(any());
+
+        WfStatusEntity learner1 = new WfStatusEntity();
+        learner1.setWfId("learner-wf-1");
+        WfStatusEntity learner2 = new WfStatusEntity();
+        learner2.setWfId("learner-wf-2");
+        when(wfStatusRepo.findByApplicationIdAndUserIdAndCurrentStatus(any(), any(), any()))
+                .thenReturn(List.of(learner1, learner2));
+        Response txResponse = new Response();
+        when(workflowservice.workflowTransition(any(), any(), any(), any(), any())).thenReturn(txResponse);
+
+        Response response = bpWorkFlowService.removeBPWorkFlow("root", "org", wfRequest, "userId", "role");
+
+        // The ERROR_MESSAGE branch is taken internally, but the method unconditionally reassigns
+        // `response` to workflowTransition's result afterwards, so the final response still reflects
+        // that (current, pre-existing) behavior rather than the intermediate error.
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+        assertNull(wfRequest.getWfId());
+    }
+
+    @Test
     void testScheduleConflictCheck_detectsStartDateConflict() {
         WfRequest req = new WfRequest();
         req.setUserId("user1");
@@ -1790,7 +2120,7 @@ class BPWorkFlowServiceImplTest {
     }
 
     @Test
-    void testProcessWFRequest_enrollInProgress_success() throws Exception {
+    void testProcessWFRequest_enrollInProgress_success() {
         wfRequest = new WfRequest();
         wfRequest.setWfId("wf1");
         wfRequest.setAction("APPROVE");
@@ -1853,7 +2183,7 @@ class BPWorkFlowServiceImplTest {
     }
 
     @Test
-    void testProcessWFRequest_approvalState_success() throws Exception {
+    void testProcessWFRequest_approvalState_success() {
         wfRequest = new WfRequest();
         wfRequest.setWfId("wf2");
         wfRequest.setAction("APPROVE");

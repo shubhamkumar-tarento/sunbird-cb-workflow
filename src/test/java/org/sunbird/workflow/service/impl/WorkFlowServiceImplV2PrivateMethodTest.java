@@ -499,6 +499,28 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     }
 
     @Test
+    void testHandleSpecialFields_nameKey_emptyUserDetails_doesNotSetPreviousRootOrgId() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("user123");
+        Map<String, Object> toValue = new HashMap<>();
+        toValue.put(Constants.NAME, "newName");
+
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+
+        List<HashMap<String, Object>> updateFieldValues = new ArrayList<>();
+        updateFieldValues.add(updateField);
+        wfRequest.setUpdateFieldValues(updateFieldValues);
+
+        when(cassandraOperation.getRecordsByProperties(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        ReflectionTestUtils.invokeMethod(workFlowService, "handleSpecialFields", wfRequest);
+
+        assertNull(wfRequest.getPreviousRootOrgId());
+    }
+
+    @Test
     void testHandleSpecialFields_emptyUpdateFieldValues() {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setUserId("user123");
@@ -769,6 +791,20 @@ class WorkFlowServiceImplV2PrivateMethodTest {
 
 
     @Test
+    void testValidateUserAndWfStatus_blankWfId_startState_doesNotThrow() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setWfId("");
+        wfRequest.setState("PENDING");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setStartState(true);
+
+        assertDoesNotThrow(() ->
+                ReflectionTestUtils.invokeMethod(workFlowService,
+                        "validateUserAndWfStatus", wfRequest, wfStatus, null));
+    }
+
+    @Test
     void testValidateUserAndWfStatus_invalidStateMismatch() {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setWfId("wf123");
@@ -969,6 +1005,56 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     }
 
     @Test
+    void testUpdateApplicationStatus_orgTransferRequest_notLastState_skipsAutoComplete() throws Exception {
+        applicationStatus = new WfStatusEntity();
+        applicationStatus.setRequestType(Constants.ORG_TRANSFER_REQUEST);
+        applicationStatus.setUserId("user-1");
+
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setActorUserId("actor-1");
+        wfRequest.setDeptName("IT");
+        wfRequest.setComment("Approved");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName("PROFILE_SERVICE");
+
+        Map<String, Object> toValue = new HashMap<>();
+        toValue.put("name", "Finance");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, toValue);
+        wfRequest.setUpdateFieldValues(new ArrayList<>(List.of(updateField)));
+
+        String nextState = "SEND_FOR_APPROVAL";
+        String userId = "user-1";
+        String role = "manager";
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setState(nextState);
+        wfStatus.setIsLastState(false);
+
+        WorkFlowModel workFlowModel = new WorkFlowModel();
+        workFlowModel.setWfstates(List.of(wfStatus));
+
+        when(mapper.writeValueAsString(any())).thenReturn("[{\"toValue\":{\"name\":\"Finance\"}}]");
+        when(configuration.getModificationRecordAllowActions()).thenReturn("APPROVE,REJECT");
+
+        WfStatusEntity savedEntity = new WfStatusEntity();
+        savedEntity.setUserId("user-1");
+        savedEntity.setWfId("wf-123");
+        savedEntity.setRequestType(Constants.ORG_TRANSFER_REQUEST);
+        savedEntity.setCurrentStatus(nextState);
+        when(wfStatusRepo.save(any())).thenReturn(savedEntity);
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("updateApplicationStatus",
+                WfStatusEntity.class, WfRequest.class, String.class, String.class, String.class, WorkFlowModel.class, String.class);
+        method.setAccessible(true);
+
+        method.invoke(workFlowService, applicationStatus, wfRequest, nextState, userId, role, workFlowModel, "test-auth-token");
+
+        verify(wfStatusRepo, never()).findByUserIdAndCurrentStatus(any(), any(), anyBoolean());
+        verify(wfStatusRepo, never()).saveAll(any());
+    }
+
+    @Test
     void testUpdateApplicationStatus_wfStatusNotFound_shouldThrowException() throws Exception {
         // Arrange
         applicationStatus = new WfStatusEntity();
@@ -1069,6 +1155,42 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     }
 
     @Test
+    void testChangeStatus_existingApplication_nullCreatedOn_doesNotSetWfRequestCreatedOn() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setState("PENDING");
+        wfRequest.setApplicationId("app1");
+        wfRequest.setActorUserId("actor1");
+        wfRequest.setUserId("user1");
+        wfRequest.setAction("APPROVE");
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setWfId("wf1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        wfRequest.setUpdateFieldValues(List.of(updateField));
+
+        WfStatusEntity existingStatus = new WfStatusEntity();
+        existingStatus.setWfId("wf1");
+        existingStatus.setCurrentStatus("PENDING");
+        existingStatus.setCreatedOn(null);
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(existingStatus);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(new HashMap<>());
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenReturn(buildTwoStateWorkFlowModel());
+
+        WfStatusEntity saved = new WfStatusEntity();
+        saved.setUserId("user1");
+        when(wfStatusRepo.save(any())).thenReturn(saved);
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("changeStatus",
+                String.class, String.class, WfRequest.class, String.class, String.class, String.class);
+        method.setAccessible(true);
+
+        method.invoke(workFlowService, "root", "org", wfRequest, "", "role1", "token");
+
+        assertNull(wfRequest.getCreatedOn());
+    }
+
+    @Test
     void testChangeStatus_ioExceptionDuringUpdate_wrappedAsApplicationException() throws Exception {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setState("PENDING");
@@ -1102,7 +1224,7 @@ class WorkFlowServiceImplV2PrivateMethodTest {
 
     @Test
     void testAutoCompleteGroupDesignationAfterTransfer_noPendingEntities_logsWarningAndSkipsSave() throws Exception {
-        when(wfStatusRepo.findByUserIdAndCurrentStatus(eq("user1"), eq(Constants.SEND_FOR_APPROVAL), eq(true)))
+        when(wfStatusRepo.findByUserIdAndCurrentStatus("user1", Constants.SEND_FOR_APPROVAL, true))
                 .thenReturn(Collections.emptyList());
 
         WfStatusEntity status = new WfStatusEntity();
@@ -1122,7 +1244,7 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     void testAutoCompleteGroupDesignationAfterTransfer_allEntitiesInvalid_skipsSaveAndPush() throws Exception {
         WfStatusEntity badEntity = new WfStatusEntity();
         badEntity.setUpdateFieldValues(""); // blank -> buildValidGroupDesignationEntity returns early
-        when(wfStatusRepo.findByUserIdAndCurrentStatus(eq("user1"), eq(Constants.SEND_FOR_APPROVAL), eq(true)))
+        when(wfStatusRepo.findByUserIdAndCurrentStatus("user1", Constants.SEND_FOR_APPROVAL, true))
                 .thenReturn(List.of(badEntity));
 
         WfStatusEntity status = new WfStatusEntity();
@@ -1204,6 +1326,32 @@ class WorkFlowServiceImplV2PrivateMethodTest {
     }
 
     @Test
+    void testProcessSingleWfRequestForEvent_blankServiceName_skipsChangeStatusBlock() throws Exception {
+        Class<?> ctxClass = Class.forName("org.sunbird.workflow.service.impl.WorkFlowServiceImplV2$WfTransitionContext");
+        Constructor<?> ctor = ctxClass.getDeclaredConstructor(String.class, String.class, String.class, String.class, String.class);
+        ctor.setAccessible(true);
+        Object context = ctor.newInstance("root", "org", "", "", "token");
+
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName("");
+        wfRequest.setUserId("user1");
+        wfRequest.setWfId("wf1");
+
+        Method method = WorkFlowServiceImplV2.class.getDeclaredMethod("processSingleWfRequestForEvent",
+                ctxClass, WfRequest.class, List.class, List.class);
+        method.setAccessible(true);
+
+        List<Object> wfRequestsForEvent = new ArrayList<>();
+        List<Object> data = new ArrayList<>();
+
+        boolean result = (boolean) method.invoke(workFlowService, context, wfRequest, wfRequestsForEvent, data);
+
+        assertFalse(result);
+        assertEquals(1, wfRequestsForEvent.size());
+        verifyNoInteractions(wfStatusRepo);
+    }
+
+    @Test
     void testProcessWfRequestsForUser_breaksOnExistingProfileWorkflow_skipsPush() throws Exception {
         Class<?> ctxClass = Class.forName("org.sunbird.workflow.service.impl.WorkFlowServiceImplV2$WfTransitionContext");
         Constructor<?> ctor = ctxClass.getDeclaredConstructor(String.class, String.class, String.class, String.class, String.class);
@@ -1221,7 +1369,7 @@ class WorkFlowServiceImplV2PrivateMethodTest {
         WfStatusEntity existing = new WfStatusEntity();
         existing.setUpdateFieldValues("[{\"toValue\":{\"group\":\"G2\"}}]");
         existing.setWfId("existingWf");
-        when(wfStatusRepo.getPendingRequests(eq("userB"), eq(Constants.PROFILE_SERVICE_NAME), eq(Constants.SEND_FOR_APPROVAL)))
+        when(wfStatusRepo.getPendingRequests("userB", Constants.PROFILE_SERVICE_NAME, Constants.SEND_FOR_APPROVAL))
                 .thenReturn(List.of(existing));
         Map<String, Object> existingToValue = Map.of("group", "G2");
         Map<String, Object> existingItem = Map.of(TO_VALUE, existingToValue);

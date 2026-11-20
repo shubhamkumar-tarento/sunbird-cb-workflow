@@ -215,6 +215,56 @@ class WorkFlowServiceImplV2Test {
     }
 
     @Test
+    void testWorkflowTransition_skipsRequestsWithBlankServiceName_usesFirstNonBlank() throws Exception {
+        WfRequest blankServiceName = new WfRequest();
+        blankServiceName.setUserId("user1");
+        blankServiceName.setServiceName("");
+
+        WfRequest validServiceName = new WfRequest();
+        validServiceName.setUserId("user2");
+        validServiceName.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        validServiceName.setWfId("wf123");
+        validServiceName.setState("PENDING");
+        validServiceName.setAction("APPROVE");
+        validServiceName.setActorUserId("actor1");
+        validServiceName.setApplicationId("app1");
+        HashMap<String, Object> updateField = new HashMap<>();
+        updateField.put(Constants.TO_VALUE, Map.of("other", "x"));
+        validServiceName.setUpdateFieldValues(List.of(updateField));
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put(Constants.REQUEST, List.of(blankServiceName, validServiceName));
+
+        when(accessTokenValidator.fetchUserIdFromAccessToken(anyString())).thenReturn("requestUser1");
+        when(wfStatusRepo.findByRootOrgAndOrgAndApplicationIdAndWfId(any(), any(), any(), any())).thenReturn(null);
+        when(requestServiceImpl.fetchResultUsingGet(any())).thenReturn(buildMockWFConfig());
+        when(mapper.readValue(anyString(), any(Class.class))).thenReturn(Map.of());
+
+        WfAction action1 = new WfAction();
+        action1.setAction("APPROVE");
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setState("PENDING");
+        wfStatus.setActions(List.of(action1));
+        WorkFlowModel model = new WorkFlowModel();
+        model.setWfstates(List.of(wfStatus));
+
+        when(mapper.convertValue(any(), any(TypeReference.class))).thenAnswer(invocation -> {
+            TypeReference<?> typeRef = invocation.getArgument(1);
+            if (typeRef.getType().getTypeName().contains("List")) {
+                return List.of(blankServiceName, validServiceName);
+            } else if (typeRef.getType().getTypeName().contains("WorkFlowModel")) {
+                return model;
+            }
+            return null;
+        });
+
+        Response response = service.workflowTransition("root", "org", requestBody, "test-auth-token");
+
+        assertNotNull(response);
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
     void testProcessAndUpdateProfessionalDetails() throws Exception {
         String userId = "user1";
         String json = """
@@ -315,6 +365,25 @@ class WorkFlowServiceImplV2Test {
         when(mapper.readTree(cachedData)).thenReturn(node);
 
         service.updateProfessionalDetailsInCache(userId, group, designation);
+
+        verify(redisCacheMgr).putInBasicProfileCache(any(), any(), anyInt());
+    }
+
+    @Test
+    void testUpdateProfessionalDetailsInCache_nullGroupAndDesignation_skipsBothUpdates() throws Exception {
+        String userId = "user1";
+        String cachedData = """
+            {
+              "professionalDetails": [ { "group": "old", "designation": "old" } ]
+            }
+        """;
+
+        when(redisCacheMgr.getContentFromCache(any())).thenReturn(cachedData);
+        ObjectNode node = (ObjectNode) new ObjectMapper().readTree(cachedData);
+        when(mapper.readTree(cachedData)).thenReturn(node);
+        when(mapper.writeValueAsString(any())).thenReturn(cachedData);
+
+        service.updateProfessionalDetailsInCache(userId, null, null);
 
         verify(redisCacheMgr).putInBasicProfileCache(any(), any(), anyInt());
     }

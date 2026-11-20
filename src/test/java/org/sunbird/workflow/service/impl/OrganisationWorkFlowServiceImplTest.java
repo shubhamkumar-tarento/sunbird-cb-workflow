@@ -191,6 +191,105 @@ class OrganisationWorkFlowServiceImplTest {
         assertTrue(exists);
     }
 
+    @Test
+    void testCreateOrgWorkFlow_EmailKey_NotFound_ProceedsToTransition() {
+        setupConfig();
+        Map<String, Object> field = Map.of(Constants.EMAIL, "email@test.com");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(buildSearchResponse(0));
+
+        Response wfResponse = new Response();
+        when(workflowService.workflowTransition(anyString(), anyString(), any())).thenReturn(wfResponse);
+
+        Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testCreateOrgWorkFlow_PhoneKey_NotFound_ProceedsToTransition() {
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms/");
+        when(configuration.getLmsUserSearchEndPoint()).thenReturn("user/search");
+        Map<String, Object> field = Map.of(Constants.PHONE, "9999999999");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(buildSearchResponse(0));
+
+        Response wfResponse = new Response();
+        when(workflowService.workflowTransition(anyString(), anyString(), any())).thenReturn(wfResponse);
+
+        Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testCreateOrgWorkFlow_UnrecognizedKey_ProceedsToTransition() {
+        Map<String, Object> field = Map.of("someOtherKey", "someValue");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
+
+        Response wfResponse = new Response();
+        when(workflowService.workflowTransition(anyString(), anyString(), any())).thenReturn(wfResponse);
+
+        Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testCreateOrgWorkFlow_ToValue_NonOrgKey_ProceedsToTransition() {
+        Map<String, Object> toValueMap = Map.of("someOtherNestedKey", "nestedValue");
+        Map<String, Object> field = Map.of(Constants.TO_VALUE, toValueMap);
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
+
+        Response wfResponse = new Response();
+        when(workflowService.workflowTransition(anyString(), anyString(), any())).thenReturn(wfResponse);
+
+        Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testCreateOrgWorkFlow_ToValue_OrgKey_NotFound_ProceedsToTransition() {
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms/");
+        when(configuration.getLmsOrgSearchEndPoint()).thenReturn("org/search");
+        Map<String, Object> toValueMap = Map.of(Constants.ORGANISATION_SERVICE_NAME, "orgName");
+        Map<String, Object> field = Map.of(Constants.TO_VALUE, toValueMap);
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(field)));
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(buildSearchResponse(0));
+
+        Response wfResponse = new Response();
+        when(workflowService.workflowTransition(anyString(), anyString(), any())).thenReturn(wfResponse);
+
+        Response response = service.createOrgWorkFlow("rootOrg", "org", wfRequest);
+
+        assertEquals(HttpStatus.OK, response.get(Constants.STATUS));
+    }
+
+    @Test
+    void testIsUserDetailExists_NullResponse_ReturnsTrue() {
+        setupConfig();
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(null);
+
+        boolean exists = service.isUserDetailExists("email", "test@test.com");
+
+        assertTrue(exists);
+    }
+
+    @Test
+    void testIsUserDetailExists_ResponseMissingResponseKey_ReturnsTrue() {
+        setupConfig();
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
+        response.put(Constants.RESPONSE_CODE, Constants.OK);
+        response.put(Constants.RESULT, result);
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), eq(Map.class), any())).thenReturn(response);
+
+        boolean exists = service.isUserDetailExists("email", "test@test.com");
+
+        assertTrue(exists);
+    }
+
     private void setupConfig() {
         when(configuration.getLmsServiceHost()).thenReturn("http://lms/");
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("user/search");

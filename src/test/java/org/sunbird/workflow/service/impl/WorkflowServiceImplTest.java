@@ -2115,7 +2115,7 @@ class WorkflowServiceImplTest {
         WfStatusEntity existingPending = new WfStatusEntity();
         existingPending.setWfId("existingWfId");
         existingPending.setUpdateFieldValues("[{\"toValue\":{\"group\":\"eng\"}}]");
-        when(wfStatusRepo.getPendingRequests(eq("user3"), eq(Constants.PROFILE_SERVICE_NAME), eq(Constants.SEND_FOR_APPROVAL)))
+        when(wfStatusRepo.getPendingRequests("user3", Constants.PROFILE_SERVICE_NAME, Constants.SEND_FOR_APPROVAL))
                 .thenReturn(List.of(existingPending));
         when(mapper.readValue(eq(existingPending.getUpdateFieldValues()), any(TypeReference.class)))
                 .thenReturn(List.of(Map.of(Constants.TO_VALUE, Map.of(Constants.GROUP, "eng"))));
@@ -2271,7 +2271,7 @@ class WorkflowServiceImplTest {
         criteria.setApplicationStatus("PENDING");
 
         Object[] row = new Object[]{"json1", "wfId1", "comment1", "lastUpdated1", "PENDING"};
-        when(wfStatusRepo.findWfFieldsForUserV2(eq("service1"), eq("PENDING"), eq("wid1")))
+        when(wfStatusRepo.findWfFieldsForUserV2("service1", "PENDING", "wid1"))
                 .thenReturn(Collections.singletonList(row));
 
         List<HashMap<String, Object>> parsedValues = List.of(
@@ -2293,7 +2293,7 @@ class WorkflowServiceImplTest {
         criteria.setServiceName("service1");
 
         Object[] row = new Object[]{"badjson", "wfId1", "comment1", "lastUpdated1", "PENDING"};
-        when(wfStatusRepo.findWfFieldsForUserV2(eq("service1"), eq("wid1"))).thenReturn(Collections.singletonList(row));
+        when(wfStatusRepo.findWfFieldsForUserV2("service1", "wid1")).thenReturn(Collections.singletonList(row));
         when(mapper.readValue(eq("badjson"), any(TypeReference.class))).thenThrow(new RuntimeException("bad json"));
 
         Response response = workflowServiceImpl.getUserWFApplicationFieldsV2("rootOrg", "org", "wid1", criteria);

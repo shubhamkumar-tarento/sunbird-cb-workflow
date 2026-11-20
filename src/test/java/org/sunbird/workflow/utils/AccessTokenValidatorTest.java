@@ -10,7 +10,6 @@ import org.keycloak.common.util.Time;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.models.KeyData;
@@ -261,7 +260,7 @@ class AccessTokenValidatorTest {
     }
 
     @Test
-    void testFetchUserRolesFromToken_invalidSignature_emptyPayload_returnsEmptyList() throws Exception {
+    void testFetchUserRolesFromToken_invalidSignature_emptyPayload_returnsEmptyList() {
         KeyData keyData = new KeyData("testKeyId", mockPublicKey);
         doReturn(keyData).when(keyManager).getPublicKey("testKeyId");
 

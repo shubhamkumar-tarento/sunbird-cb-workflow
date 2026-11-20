@@ -1,6 +1,9 @@
 package org.sunbird.workflow.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
@@ -1019,5 +1022,655 @@ class NotificationServiceImplTest {
     void sendNotificationToMdoLeader_shouldLogErrorWhenModeratorsNull() {
         assertDoesNotThrow(() -> notificationService.sendNotificationToMdoLeader(
                 List.of("mdo@example.com"), "Community", "2024-06-01", null));
+    }
+
+    // ---------- logWorkflowStatusForDebug branch (104-111) ----------
+
+    @Test
+    void sendNotification_shouldSkipDebugLogging_whenInfoDisabled() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setUpdateFieldValues(Collections.emptyList());
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("APPROVED");
+        wfStatusEntity.setApplicationId("appId");
+        wfStatusEntity.setServiceName(Constants.PROFILE_SERVICE_NAME);
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+
+        Configurator.setLevel(NotificationServiceImpl.class.getName(), Level.WARN);
+        try {
+            notificationService.sendNotification(wfRequest);
+        } finally {
+            Configurator.setLevel(NotificationServiceImpl.class.getName(), Level.DEBUG);
+        }
+
+        verify(mapper, never()).writeValueAsString(any());
+    }
+
+    @Test
+    void sendNotification_shouldLogError_whenStatusSerializationFails() throws Exception {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setUpdateFieldValues(Collections.emptyList());
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("APPROVED");
+        wfStatusEntity.setApplicationId("appId");
+        wfStatusEntity.setServiceName(Constants.PROFILE_SERVICE_NAME);
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+        when(mapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("boom") {});
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+
+        assertDoesNotThrow(() -> notificationService.sendNotification(wfRequest));
+    }
+
+    // ---------- resolveFieldKeyFromUpdatedValues / buildMdoAdminNotificationParams branches ----------
+
+    @Test
+    void sendNotificationToMdoAdmin_shouldHandleEmptyUpdateFieldValues() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setAction("SOME_ACTION");
+        wfRequest.setUserId("userId");
+        wfRequest.setUpdateFieldValues(Collections.emptyList());
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("PENDING");
+        wfStatusEntity.setApplicationId("appId");
+        wfStatusEntity.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState("PENDING");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(List.of("mdo@example.com"));
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(configuration.getMdoEmailTemplate()).thenReturn("template");
+        when(configuration.getSenderMail()).thenReturn("sender@example.com");
+
+        notificationService.sendNotificationToMdoAdmin(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdmin_shouldHandleEmptyToValueMap() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setAction("SOME_ACTION");
+        wfRequest.setUserId("userId");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(Map.of("toValue", new HashMap<>()))));
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("PENDING");
+        wfStatusEntity.setApplicationId("appId");
+        wfStatusEntity.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState("PENDING");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(List.of("mdo@example.com"));
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(configuration.getMdoEmailTemplate()).thenReturn("template");
+        when(configuration.getDomainHost()).thenReturn("http://domain");
+        when(configuration.getMdoBaseUrl()).thenReturn("/mdo/{id}");
+        when(configuration.getSenderMail()).thenReturn("sender@example.com");
+
+        notificationService.sendNotificationToMdoAdmin(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdmin_approveStateButDifferentField_routesToMdoAdminNotification() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setAction(Constants.APPROVE_STATE);
+        wfRequest.setUserId("userId");
+        wfRequest.setRootOrgId("currentRootOrgId");
+        wfRequest.setPreviousRootOrgId("previousRootOrgId");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(Map.of("toValue", new HashMap<>(Map.of("designation", "Manager"))))));
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("PENDING");
+        wfStatusEntity.setApplicationId("appId");
+        wfStatusEntity.setServiceName(Constants.PROFILE_SERVICE_NAME);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState("PENDING");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+        when(userProfileWfService.getMdoAdminAndPCDetails(eq("currentRootOrgId"), any())).thenReturn(List.of("mdo@example.com"));
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(configuration.getMdoEmailTemplate()).thenReturn("template");
+        when(configuration.getDomainHost()).thenReturn("http://domain");
+        when(configuration.getMdoBaseUrl()).thenReturn("/mdo/{id}");
+        when(configuration.getSenderMail()).thenReturn("sender@example.com");
+
+        notificationService.sendNotificationToMdoAdmin(wfRequest);
+
+        verify(userProfileWfService).getMdoAdminAndPCDetails(eq("currentRootOrgId"), any());
+        verify(userProfileWfService, never()).getMdoAdminAndPCDetails(eq("previousRootOrgId"), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdmin_shouldReturnEarly_whenNotificationEnabledButStateIsTerminal() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setAction("SOME_ACTION");
+        wfRequest.setUpdateFieldValues(List.of(new HashMap<>(Map.of("toValue", Map.of("domain", "example.com")))));
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("PENDING");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState(Constants.APPROVED);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        notificationService.sendNotificationToMdoAdmin(wfRequest);
+
+        verify(userProfileWfService, never()).getMdoAdminAndPCDetails(any(), any());
+    }
+
+    // ---------- sendNotificationToMdoAdminAndPC branch combinations ----------
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldDoNothing_whenNotificationEnabledAndStateTerminal() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState("SOME_OTHER_STATE");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("PENDING");
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState(Constants.APPROVED);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(contentReadService.getRootOrgId(any())).thenReturn("rootOrgId");
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(userProfileWfService, never()).getMdoAdminAndPCDetails(any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldSkipNomination_whenAdditionalPropertiesNull() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+        wfStatusEntity.setAdditionalProperties(null);
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState(Constants.APPROVED);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(contentReadService.getRootOrgId(any())).thenReturn("rootOrgId");
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(userProfileWfService, never()).getMdoAdminAndPCDetails(any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldSkipNomination_whenNotNominatedByMdo() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+        wfStatusEntity.setAdditionalProperties("someOtherFlag:true");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState(Constants.APPROVED);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(contentReadService.getRootOrgId(any())).thenReturn("rootOrgId");
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(userProfileWfService, never()).getMdoAdminAndPCDetails(any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldSkipEmailSend_whenMdoEmailListEmpty() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+        wfStatusEntity.setAdditionalProperties("isNominatedByMdo:true");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(false);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(Collections.emptyList());
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(requestService, never()).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- resolveMdoAdminAndPcNotification branch combinations ----------
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldDoNothing_whenStateCombinationUnmatched() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.INITIATE);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("SOME_UNRELATED_STATUS");
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState("PENDING");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(contentReadService.getRootOrgId(any())).thenReturn("rootOrgId");
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(List.of("someone@example.com"));
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(requestService, never()).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    @Test
+    void sendNotificationToMdoAdminAndPC_shouldForwardOnlyToMdo_whenCurrentStatusNotPc() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.SEND_FOR_MDO_APPROVAL);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("SOME_UNRELATED_STATUS");
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(true);
+        wfStatus.setState("PENDING");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(contentReadService.getRootOrgId(any())).thenReturn("rootOrgId");
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(List.of("someone@example.com"));
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(requestService, never()).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- sendMailToMDOForOrgChange template branch (565) ----------
+
+    @Test
+    void sendMailToMDOForOrgChange_shouldSkipTemplateData_whenTemplateLookupEmpty() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setUserId("userId");
+        wfRequest.setPreviousRootOrgId("prevRootOrgId");
+
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(List.of("mdo@example.com"));
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn((HashMap<String, Object>) usersObj);
+        when(configuration.getOrgChangeNotificationTemplate()).thenReturn("orgChangeTemplate");
+        when(configuration.getSenderMail()).thenReturn("sender@example.com");
+        when(cassandraOperation.getRecordsByProperties(any(), any(), any(), any())).thenReturn(Collections.emptyList());
+
+        notificationService.sendMailToMDOForOrgChange(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- sendNotificationEmail template branch (520, 530-531) ----------
+
+    @Test
+    void sendNotification_shouldSkipEmailSend_whenEmailListEmpty() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setCourseId("courseId");
+        wfRequest.setBatchName("Batch1");
+        wfRequest.setCourseName("Course1");
+        wfRequest.setBatchStartDate(new Date());
+        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
+        wfStatusEntity.setUserId("userId");
+        wfStatusEntity.setRootOrg("rootOrg");
+        wfStatusEntity.setOrg("org");
+        wfStatusEntity.setAdditionalProperties("isNominatedByMdo:true");
+
+        WfStatus wfStatus = new WfStatus();
+        wfStatus.setNotificationEnable(false);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
+
+        Map<String, Object> recipientInfo = new HashMap<>();
+        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", recipientInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(Collections.emptyList());
+        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
+        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
+
+        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
+
+        verify(requestService, never()).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    @Test
+    void sendAiAssessmentNotification_shouldSetTemplateData_whenTemplateContentFound() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setRootOrgId("rootOrgId");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.PENDING);
+        wfStatusEntity.setCreatedOn(new Date());
+        wfStatusEntity.setDeptName("Finance");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(configuration.getAiAssessmentSpvAdminEmail()).thenReturn(List.of("spv@example.com"));
+
+        Map<String, Object> userInfo = new HashMap<>();
+        userInfo.put(Constants.FIRST_NAME, "Ajay");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", userInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+
+        when(configuration.getCbpPortalHost()).thenReturn("http://cbp");
+        when(configuration.getAiAssessmentApprovalLink()).thenReturn("/approve");
+        when(configuration.getAiAssessmentSpvEmailBody()).thenReturn("body #userName #organization #submittedOn #approvalLink #applicationName");
+        when(configuration.getAiAssessmentSpvEmailSubject()).thenReturn("SPV Subject");
+        when(configuration.getNotificationEmailTemplate()).thenReturn("notifTemplate");
+        when(cassandraOperation.getRecordsByProperties(any(), any(), any(), any())).thenReturn(List.of(Map.of(Constants.TEMPLATE, "Hello #userName")));
+
+        notificationService.sendAiAssessmentNotification(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- sendNotificationToSPV organization fallback (661-663) and formatDate (740-741) ----------
+
+    @Test
+    void sendAiAssessmentNotification_shouldUseUserDepartment_whenWfDeptNameBlank() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setRootOrgId("rootOrgId");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.PENDING);
+        wfStatusEntity.setCreatedOn(null);
+        wfStatusEntity.setDeptName("");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+        when(configuration.getAiAssessmentSpvAdminEmail()).thenReturn(List.of("spv@example.com"));
+
+        Map<String, Object> userInfo = new HashMap<>();
+        userInfo.put(Constants.FIRST_NAME, "Ajay");
+        userInfo.put(Constants.DEPARTMENT_NAME, "Engineering");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", userInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+
+        when(configuration.getCbpPortalHost()).thenReturn("http://cbp");
+        when(configuration.getAiAssessmentApprovalLink()).thenReturn("/approve");
+        when(configuration.getAiAssessmentSpvEmailBody()).thenReturn("body #userName #organization #submittedOn #approvalLink #applicationName");
+        when(configuration.getAiAssessmentSpvEmailSubject()).thenReturn("SPV Subject");
+
+        notificationService.sendAiAssessmentNotification(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- sendAiAssessmentNotification unrecognized status (639-640) ----------
+
+    @Test
+    void sendAiAssessmentNotification_shouldDoNothing_whenStatusUnrecognized() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus("SOME_OTHER_STATUS");
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+
+        notificationService.sendAiAssessmentNotification(wfRequest);
+
+        verify(userProfileWfService, never()).getUsersResult(any());
+        verify(configuration, never()).getAiAssessmentSpvAdminEmail();
+    }
+
+    // ---------- sendNotificationToAiAssessmentUser rejection reason fallback (716-717) and null lastUpdatedOn (740-741) ----------
+
+    @Test
+    void sendAiAssessmentNotification_shouldUseDefaultRejectionReason_whenNoComment() {
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setApplicationId("appId");
+        wfRequest.setWfId("wfId");
+        wfRequest.setUserId("userId");
+        wfRequest.setActorUserId("approverId");
+
+        WfStatusEntity wfStatusEntity = new WfStatusEntity();
+        wfStatusEntity.setCurrentStatus(Constants.REJECTED);
+        wfStatusEntity.setLastUpdatedOn(null);
+
+        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
+
+        Map<String, Object> userInfo = new HashMap<>();
+        userInfo.put(Constants.FIRST_NAME, "Ajay");
+        userInfo.put(Constants.EMAIL, "ajay@example.com");
+        Map<String, Object> usersObj = new HashMap<>();
+        usersObj.put("userId", userInfo);
+        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
+
+        when(configuration.getAiAssessmentRejectedEmailSubject()).thenReturn("Rejected Subject");
+        when(configuration.getAiAssessmentRejectedEmailBody()).thenReturn("body #userName #approverName #actionDate #rejectionReason #applicationName");
+
+        notificationService.sendAiAssessmentNotification(wfRequest);
+
+        verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
     }
 }

@@ -1,5 +1,6 @@
 package org.sunbird.workflow.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -23,8 +24,10 @@ import org.sunbird.workflow.utils.CassandraOperation;
 import org.sunbird.workflow.utils.ElasticsearchServiceManager;
 import org.sunbird.workflow.utils.UserUtil;
 
+import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
@@ -818,5 +821,48 @@ class BPWorkFlowServiceImplPrivateMethodTest {
         String result = ReflectionTestUtils.invokeMethod(bpWorkFlowService, "findRoleFromOrg", org);
 
         assertNull(result);
+    }
+
+    @Test
+    void testFinalizeApplicationStatusAndBuildResponse_jsonProcessingException_logsAndStillSaves() throws Exception {
+        BPWorkFlowServiceImpl service = newBPWorkFlowServiceImpl();
+        WfStatusRepo wfStatusRepo = mock(WfStatusRepo.class);
+        ObjectMapper throwingMapper = mock(ObjectMapper.class);
+        setPrivateField(service, "wfStatusRepo", wfStatusRepo);
+        setPrivateField(service, "mapper", throwingMapper);
+
+        when(throwingMapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("boom") {});
+
+        WfStatusEntity applicationStatus = new WfStatusEntity();
+        WfRequest wfRequest = new WfRequest();
+        wfRequest.setDeptName("IT");
+        wfRequest.setComment("comment");
+        wfRequest.setUpdateFieldValues(new ArrayList<>());
+
+        Method method = BPWorkFlowServiceImpl.class.getDeclaredMethod("finalizeApplicationStatusAndBuildResponse",
+                WfStatusEntity.class, WfRequest.class, String.class, String.class);
+        method.setAccessible(true);
+        Response response = (Response) method.invoke(service, applicationStatus, wfRequest, "wf-json-ex", "SOME_STATUS");
+
+        assertEquals(200, ((org.springframework.http.HttpStatus) response.get("status")).value());
+        assertEquals("IT", applicationStatus.getDeptName());
+        verify(wfStatusRepo).save(applicationStatus);
+    }
+
+    @Test
+    void testDeleteTempFile_ioExceptionOnDelete_logsWarningWithoutThrowing() throws Exception {
+        File nonEmptyDir = Files.createTempDirectory("bp-delete-test").toFile();
+        File innerFile = new File(nonEmptyDir, "inner.txt");
+        assertTrue(innerFile.createNewFile());
+
+        try {
+            // Files.delete on a non-empty directory throws DirectoryNotEmptyException (an IOException),
+            // which deleteTempFile is expected to swallow and log rather than propagate.
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(bpWorkFlowService, "deleteTempFile", nonEmptyDir));
+            assertTrue(nonEmptyDir.exists());
+        } finally {
+            innerFile.delete();
+            nonEmptyDir.delete();
+        }
     }
 }

@@ -12,6 +12,10 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,7 +37,6 @@ import org.sunbird.workflow.utils.CassandraOperation;
 import org.sunbird.workflow.utils.UserUtil;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -43,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -227,7 +231,7 @@ class UserBulkUploadService4Test {
     // ---------- writeHeaderRow early-return (204) ----------
 
     @Test
-    void testWriteHeaderRow_emptyIterator_returnsEarly() throws Exception {
+    void testWriteHeaderRow_emptyIterator_returnsEarly() {
         List<Row> empty = new ArrayList<>();
         assertDoesNotThrow(() -> invokePrivate("writeHeaderRow", new Class[]{java.util.Iterator.class}, empty.iterator()));
     }
@@ -235,7 +239,7 @@ class UserBulkUploadService4Test {
     // ---------- markSheetEmptyFailure (189 call-site covered via direct call) ----------
 
     @Test
-    void testMarkSheetEmptyFailure_setsFailureCells() throws Exception {
+    void testMarkSheetEmptyFailure_setsFailureCells() {
         XSSFWorkbook wb = new XSSFWorkbook();
         XSSFSheet sheet = wb.createSheet();
         sheet.createRow(0);
@@ -253,12 +257,27 @@ class UserBulkUploadService4Test {
         assertTrue(errList.contains("Invalid Full Name"));
     }
 
-    @Test
-    void testValidateFullNameColumn_nonString_addsError() throws Exception {
-        Row row = rowWithCell(0, 5.0, CellType.NUMERIC);
+    @ParameterizedTest(name = "{3} rejects non-string cell at column {0}")
+    @MethodSource("nonStringColumnRejectionCases")
+    void testValidateColumn_nonStringCell_addsError(int columnIndex, Object cellValue, CellType cellType,
+            String methodName, String expectedMessage) throws Exception {
+        Row row = rowWithCell(columnIndex, cellValue, cellType);
         List<String> errList = new ArrayList<>();
-        invokePrivate("validateFullNameColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Full Name type. Expecting string format"));
+        invokePrivate(methodName, new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
+        assertTrue(errList.contains(expectedMessage));
+    }
+
+    static Stream<Arguments> nonStringColumnRejectionCases() {
+        return Stream.of(
+                Arguments.of(0, 5.0, CellType.NUMERIC, "validateFullNameColumn", "Invalid value for Full Name type. Expecting string format"),
+                Arguments.of(5, 1.0, CellType.NUMERIC, "validateGenderColumn", "Invalid value for Gender type. Expecting string format"),
+                Arguments.of(6, 1.0, CellType.NUMERIC, "validateCategoryColumn", "Invalid value for Category type. Expecting string format"),
+                Arguments.of(7, "99-99-9999", CellType.STRING, "validateDobColumn", "Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy"),
+                Arguments.of(7, Boolean.TRUE, CellType.BOOLEAN, "validateDobColumn", "Invalid value for Date of Birth type. Expecting string format"),
+                Arguments.of(8, 1.0, CellType.NUMERIC, "validateMotherTongueColumn", "Invalid value for Mother Tongue type. Expecting string format"),
+                Arguments.of(9, Boolean.TRUE, CellType.BOOLEAN, "validateEmployeeIdColumn", "Invalid value for Employee ID type. Expecting string/number format"),
+                Arguments.of(10, Boolean.TRUE, CellType.BOOLEAN, "validatePinCodeColumn", "Invalid value for Office Pin Code type. Expecting number/string format")
+        );
     }
 
     // ---------- validateGroupColumn (511) ----------
@@ -335,14 +354,6 @@ class UserBulkUploadService4Test {
         assertTrue(errList.isEmpty());
     }
 
-    @Test
-    void testValidateGenderColumn_nonString_addsError() throws Exception {
-        Row row = rowWithCell(5, 1.0, CellType.NUMERIC);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateGenderColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Gender type. Expecting string format"));
-    }
-
     // ---------- validateCategoryColumn (566, 569) ----------
 
     @Test
@@ -354,31 +365,7 @@ class UserBulkUploadService4Test {
         assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Category")));
     }
 
-    @Test
-    void testValidateCategoryColumn_nonString_addsError() throws Exception {
-        Row row = rowWithCell(6, 1.0, CellType.NUMERIC);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateCategoryColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Category type. Expecting string format"));
-    }
-
     // ---------- validateDobColumn / validateDobStringCell / validateDobNumericCell (581-582,584,593,598-600,602-606,608,610) ----------
-
-    @Test
-    void testValidateDobColumn_invalidStringDate_addsError() throws Exception {
-        Row row = rowWithCell(7, "99-99-9999", CellType.STRING);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateDobColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy"));
-    }
-
-    @Test
-    void testValidateDobColumn_booleanCell_addsError() throws Exception {
-        Row row = rowWithCell(7, Boolean.TRUE, CellType.BOOLEAN);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateDobColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Date of Birth type. Expecting string format"));
-    }
 
     @Test
     void testValidateDobColumn_numericNotDateFormatted_addsError() throws Exception {
@@ -441,14 +428,6 @@ class UserBulkUploadService4Test {
         assertTrue(errList.isEmpty());
     }
 
-    @Test
-    void testValidateMotherTongueColumn_nonString_addsError() throws Exception {
-        Row row = rowWithCell(8, 1.0, CellType.NUMERIC);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateMotherTongueColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Mother Tongue type. Expecting string format"));
-    }
-
     // ---------- validateEmployeeIdColumn (627-631, 633, 635-637) ----------
 
     @Test
@@ -471,14 +450,6 @@ class UserBulkUploadService4Test {
         assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Employee ID")));
     }
 
-    @Test
-    void testValidateEmployeeIdColumn_nonStringNonNumeric_addsError() throws Exception {
-        Row row = rowWithCell(9, Boolean.TRUE, CellType.BOOLEAN);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validateEmployeeIdColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Employee ID type. Expecting string/number format"));
-    }
-
     // ---------- validatePinCodeColumn (643-650, 652, 654-655) ----------
 
     @Test
@@ -499,14 +470,6 @@ class UserBulkUploadService4Test {
         List<String> errList = new ArrayList<>();
         invokePrivate("validatePinCodeColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
         assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Office Pin Code")));
-    }
-
-    @Test
-    void testValidatePinCodeColumn_nonStringNonNumeric_addsError() throws Exception {
-        Row row = rowWithCell(10, Boolean.TRUE, CellType.BOOLEAN);
-        List<String> errList = new ArrayList<>();
-        invokePrivate("validatePinCodeColumn", new Class[]{Row.class, Map.class, List.class}, row, new HashMap<>(), errList);
-        assertTrue(errList.contains("Invalid value for Office Pin Code type. Expecting number/string format"));
     }
 
     // ---------- validateExternalSystemIdColumn (661-665, 667-670, 673) ----------
@@ -613,7 +576,7 @@ class UserBulkUploadService4Test {
         String json = "[{\"toValue\":{\"someOtherKey\":\"v\"}}]";
         entity.setUpdateFieldValues(json);
         List<Map<String, Object>> parsed = List.of(Map.of(Constants.TO_VALUE, Map.of("someOtherKey", "v")));
-        when(mapper.readValue(eq(json), eq(List.class))).thenReturn(parsed);
+        when(mapper.readValue(json, List.class)).thenReturn(parsed);
 
         Map<String, Object> valuesToBeUpdate = new HashMap<>();
         StringBuilder str = new StringBuilder();
@@ -762,7 +725,7 @@ class UserBulkUploadService4Test {
         userSearchResult.put(Constants.RESULT, response);
         when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(userSearchResult);
-        when(wfStatusRepo.findByUserIdAndCurrentStatus(eq("user-1"), eq(true))).thenReturn(Collections.emptyList());
+        when(wfStatusRepo.findByUserIdAndCurrentStatus("user-1", true)).thenReturn(Collections.emptyList());
 
         XSSFWorkbook wb = new XSSFWorkbook();
         Row row = wb.createSheet().createRow(0);
@@ -834,7 +797,9 @@ class UserBulkUploadService4Test {
     @Test
     void testVerifyUserRecordExists_exception_wrappedAsApplicationException() {
         when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenThrow(new RuntimeException("boom"));
-        assertThrows(ApplicationException.class, () -> service.verifyUserRecordExists(new HashMap<>(), new HashMap<>()));
+        Map<String, Object> filters = new HashMap<>();
+        Map<String, Object> userRecordDetails = new HashMap<>();
+        assertThrows(ApplicationException.class, () -> service.verifyUserRecordExists(filters, userRecordDetails));
     }
 
     // ---------- uploadTheUpdatedFile success branch (729) ----------
@@ -1178,12 +1143,12 @@ class UserBulkUploadService4Test {
 
     @Test
     void testRecordOversizedRowV1_addsFailureRecord() throws Exception {
-        CSVRecord record = csvRecordWithColumn(0, "value");
+        CSVRecord csvRecord = csvRecordWithColumn(0, "value");
         List<Map<String, Object>> updatedRecords = new ArrayList<>();
         Object counters = newCounters();
         invokePrivate("recordOversizedRowV1",
                 new Class[]{CSVRecord.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$BulkUploadCounters")},
-                record, updatedRecords, counters);
+                csvRecord, updatedRecords, counters);
         assertEquals(1, updatedRecords.size());
         assertEquals(1, getField(counters, "totalRecordsCount"));
         assertEquals(1, getField(counters, "failedRecordsCount"));
@@ -1245,13 +1210,13 @@ class UserBulkUploadService4Test {
 
     @Test
     void testPopulateValuesToBeUpdateV1_setsMobileWhenNotExisting() throws Exception {
-        CSVRecord record = csvRecordWithColumn(-1, null);
+        CSVRecord csvRecord = csvRecordWithColumn(-1, null);
         Map<String, Object> valuesToBeUpdate = new HashMap<>();
         List<String> errList = new ArrayList<>();
         Object epValidation = newEmailPhoneValidation("9876543210", true, true, false, new HashMap<>());
         invokePrivate("populateValuesToBeUpdateV1",
                 new Class[]{CSVRecord.class, Map.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$EmailPhoneValidation"), String.class},
-                record, valuesToBeUpdate, errList, epValidation, ";");
+                csvRecord, valuesToBeUpdate, errList, epValidation, ";");
         assertEquals("9876543210", valuesToBeUpdate.get(Constants.MOBILE));
     }
 
@@ -1282,27 +1247,583 @@ class UserBulkUploadService4Test {
 
     @Test
     void testProcessSingleRecordV1_oversizedRow_recordsFailure() throws Exception {
-        CSVRecord record = csvRecordWithColumn(0, "a");
+        CSVRecord csvRecord = csvRecordWithColumn(0, "a");
         List<String> headers = List.of("a");
         Object counters = newCounters();
         List<Map<String, Object>> updatedRecords = new ArrayList<>();
         invokePrivate("processSingleRecordV1",
                 new Class[]{CSVRecord.class, List.class, Map.class, String.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$BulkUploadCounters")},
-                record, headers, new HashMap<String, String>(), ";", updatedRecords, counters);
+                csvRecord, headers, new HashMap<String, String>(), ";", updatedRecords, counters);
         assertEquals(1, updatedRecords.size());
         assertEquals(1, getField(counters, "failedRecordsCount"));
     }
 
     @Test
     void testProcessSingleRecordV1_validationErrors_recordsFailure() throws Exception {
-        CSVRecord record = csvRecordWithColumn(-1, null); // all 14 fields blank -> both email+phone missing
+        CSVRecord csvRecord = csvRecordWithColumn(-1, null); // all 14 fields blank -> both email+phone missing
         List<String> headers = new ArrayList<>(Collections.nCopies(20, "h"));
         Object counters = newCounters();
         List<Map<String, Object>> updatedRecords = new ArrayList<>();
         invokePrivate("processSingleRecordV1",
                 new Class[]{CSVRecord.class, List.class, Map.class, String.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$BulkUploadCounters")},
-                record, headers, new HashMap<String, String>(), ";", updatedRecords, counters);
+                csvRecord, headers, new HashMap<String, String>(), ";", updatedRecords, counters);
         assertEquals(1, updatedRecords.size());
         assertEquals(1, getField(counters, "failedRecordsCount"));
+    }
+
+    // ===================== Third coverage wave: branch-coverage gaps =====================
+
+    // ---------- updateUserBulkUploadStatus: all-omitted-fields branches (111,114,117,120) ----------
+
+    @Test
+    void testUpdateUserBulkUploadStatus_allOptionalFieldsOmitted_onlyDateFieldAdded() {
+        ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
+        service.updateUserBulkUploadStatus("root-1", "id-1", "", -1, -1, -1);
+        verify(cassandraOperation).updateRecord(eq(Constants.KEYSPACE_SUNBIRD), eq(Constants.TABLE_USER_BULK_UPDATE), captor.capture(), anyMap());
+        Map<?, ?> fields = captor.getValue();
+        assertFalse(fields.containsKey(Constants.STATUS));
+        assertFalse(fields.containsKey(Constants.TOTAL_RECORDS));
+        assertFalse(fields.containsKey(Constants.SUCCESSFUL_RECORDS_COUNT));
+        assertFalse(fields.containsKey(Constants.FAILED_RECORDS_COUNT));
+    }
+
+    // ---------- validateEmailForRow (244-259) ----------
+
+    @Test
+    void testValidateEmailForRow_blankCell_returnsEmptyEarly() throws Exception {
+        Row row = rowWithCell(-1, null, CellType.STRING);
+        List<String> errList = new ArrayList<>();
+        Object result = newRowValidation(null, false, false, false, null);
+        String email = (String) invokePrivate("validateEmailForRow",
+                new Class[]{Row.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                row, errList, result);
+        assertEquals("", email);
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateEmailForRow_invalidPattern_addsErrorAndReturnsEmail() throws Exception {
+        Row row = rowWithCell(1, "not-an-email", CellType.STRING);
+        List<String> errList = new ArrayList<>();
+        Object result = newRowValidation(null, false, false, false, null);
+        String email = (String) invokePrivate("validateEmailForRow",
+                new Class[]{Row.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                row, errList, result);
+        assertEquals("not-an-email", email);
+        assertTrue(errList.contains("The Email provided in Invalid"));
+    }
+
+    // ---------- validatePhoneForRow (261-285) ----------
+
+    @Test
+    void testValidatePhoneForRow_numericCell_convertsAndValidates() throws Exception {
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(null);
+        Row row = rowWithCell(2, 9876543210.0, CellType.NUMERIC);
+        List<String> errList = new ArrayList<>();
+        Object result = newRowValidation(null, false, false, false, null);
+        invokePrivate("validatePhoneForRow",
+                new Class[]{Row.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                row, errList, result);
+        assertEquals("9876543210", getField(result, "phoneNumber"));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidatePhoneForRow_nonStringNonNumeric_addsError() throws Exception {
+        Row row = rowWithCell(2, Boolean.TRUE, CellType.BOOLEAN);
+        List<String> errList = new ArrayList<>();
+        Object result = newRowValidation(null, false, false, false, null);
+        invokePrivate("validatePhoneForRow",
+                new Class[]{Row.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                row, errList, result);
+        assertTrue(errList.contains("Invalid Value of Mobile Number. Expecting number/string format"));
+    }
+
+    @Test
+    void testValidatePhoneForRow_invalidPattern_addsError() throws Exception {
+        Row row = rowWithCell(2, "123", CellType.STRING);
+        List<String> errList = new ArrayList<>();
+        Object result = newRowValidation(null, false, false, false, null);
+        invokePrivate("validatePhoneForRow",
+                new Class[]{Row.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                row, errList, result);
+        assertTrue(errList.contains("The Mobile Number provided is Invalid"));
+    }
+
+    // ---------- applyEmailOrPhoneExistenceCheck true-branch (287-295) ----------
+
+    @Test
+    void testApplyEmailOrPhoneExistenceCheck_conditionTrue_callsVerify() throws Exception {
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(null);
+        Object result = newRowValidation("9876543210", true, false, false, new HashMap<>());
+        invokePrivate("applyEmailOrPhoneExistenceCheck",
+                new Class[]{String.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$RowEmailPhoneValidation")},
+                "a@b.com", result);
+        verify(requestServiceImpl).fetchResultUsingPost(any(), any(), any(), any());
+    }
+
+    // ---------- applyPendingRequestUpdatesForRow + applyPendingRequestForStatus matching-key path (313-338) ----------
+
+    @Test
+    void testApplyPendingRequestUpdatesForRow_withPendingEntity_appliesUpdate() throws Exception {
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setWfId("wf-10");
+        String json = "[{\"toValue\":{\"firstname\":\"Expected\"}}]";
+        entity.setUpdateFieldValues(json);
+        List<Map<String, Object>> parsed = List.of(Map.of(Constants.TO_VALUE, Map.of("firstname", "Expected")));
+        when(mapper.readValue(json, List.class)).thenReturn(parsed);
+        when(wfStatusRepo.findByUserIdAndCurrentStatus("user-1", true)).thenReturn(List.of(entity));
+        when(wfStatusRepo.findByWfId("wf-10")).thenReturn(entity);
+
+        Map<String, Object> valuesToBeUpdate = new HashMap<>();
+        valuesToBeUpdate.put("firstname", "Expected");
+        StringBuilder str = new StringBuilder();
+        Row row = rowWithCell(14, null, CellType.STRING);
+        Cell statusCell = row.createCell(14);
+        Cell errorDetails = row.createCell(15);
+
+        boolean result = (boolean) invokePrivate("applyPendingRequestUpdatesForRow",
+                new Class[]{String.class, Map.class, StringBuilder.class, Cell.class, Cell.class},
+                "user-1", valuesToBeUpdate, str, statusCell, errorDetails);
+        assertTrue(result);
+        assertFalse(valuesToBeUpdate.containsKey("firstname"));
+    }
+
+    // ---------- validateGroupColumn valid path (504-517) ----------
+
+    @Test
+    void testValidateGroupColumn_valid_noError() throws Exception {
+        when(configuration.getGroupValues()).thenReturn(java.util.Arrays.asList("Group1"));
+        Row row = rowWithCell(3, "Group1", CellType.STRING);
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateGroupColumn", new Class[]{Row.class, Map.class, List.class}, row, values, errList);
+        assertEquals("Group1", values.get(Constants.GROUP));
+        assertTrue(errList.isEmpty());
+    }
+
+    // ---------- validateMotherTongueColumn invalid-value path (612-624) ----------
+
+    @Test
+    void testValidateMotherTongueColumn_invalidFieldValue_addsError() throws Exception {
+        when(redisCacheMgr.keyExists("languages")).thenReturn(true);
+        when(redisCacheMgr.valueExists("languages", "klingon")).thenReturn(false);
+        Row row = rowWithCell(8, "Klingon", CellType.STRING);
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateMotherTongueColumn", new Class[]{Row.class, Map.class, List.class}, row, values, errList);
+        assertTrue(errList.contains("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)"));
+    }
+
+    // ===================== CSV (V1) per-column validators: validate*ColumnV1 (previously entirely uncovered) =====================
+
+    @Test
+    void testValidateFullNameColumnV1_invalidName_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(0, "123Invalid");
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateFullNameColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, new HashMap<>(), errList);
+        assertTrue(errList.contains("Invalid Full Name format"));
+    }
+
+    @Test
+    void testValidateFullNameColumnV1_valid_stores() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(0, "John Doe");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateFullNameColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("John Doe", values.get(Constants.FIRSTNAME));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateGroupColumnV1_invalid_addsError() throws Exception {
+        when(configuration.getGroupValues()).thenReturn(java.util.Arrays.asList("Group1"));
+        CSVRecord csvRecord = csvRecordWithColumn(3, "GroupX");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateGroupColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("GroupX", values.get(Constants.GROUP));
+        assertTrue(errList.contains("Invalid value of Group Type, please choose a valid value from the default list"));
+    }
+
+    @Test
+    void testValidateGroupColumnV1_valid_noError() throws Exception {
+        when(configuration.getGroupValues()).thenReturn(java.util.Arrays.asList("Group1"));
+        CSVRecord csvRecord = csvRecordWithColumn(3, "Group1");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateGroupColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("Group1", values.get(Constants.GROUP));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateDesignationColumnV1_patternMismatch_addsError() throws Exception {
+        when(configuration.getCsvDesignationRegex()).thenReturn("^NOMATCH$");
+        Map<String, Object> innerResult = new HashMap<>();
+        innerResult.put(Constants.DATA, List.of(Map.of("id", "d1")));
+        Map<String, Object> outerResult = new HashMap<>();
+        outerResult.put(Constants.RESULT, innerResult);
+        Map<String, Object> response = new HashMap<>();
+        response.put(Constants.RESULT, outerResult);
+        when(configuration.getSearchDesignationResultSize()).thenReturn(10);
+        when(configuration.getCbPoresServiceHost()).thenReturn("http://host/");
+        when(configuration.getCbPoresMasterDesignationEndpoint()).thenReturn("/designations");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(response);
+        CSVRecord csvRecord = csvRecordWithColumn(4, "Manager");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateDesignationColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("Manager", values.get(Constants.DESIGNATION));
+        assertTrue(errList.contains("Invalid Designation: Designation should be added from default list and cannot contain special character"));
+        assertFalse(errList.contains("Invalid Value of Designation, please choose a valid value from the default list"));
+    }
+
+    @Test
+    void testValidateDesignationColumnV1_valid_noError() throws Exception {
+        when(configuration.getCsvDesignationRegex()).thenReturn(".*");
+        Map<String, Object> innerResult = new HashMap<>();
+        innerResult.put(Constants.DATA, List.of(Map.of("id", "d1")));
+        Map<String, Object> outerResult = new HashMap<>();
+        outerResult.put(Constants.RESULT, innerResult);
+        Map<String, Object> response = new HashMap<>();
+        response.put(Constants.RESULT, outerResult);
+        when(configuration.getSearchDesignationResultSize()).thenReturn(10);
+        when(configuration.getCbPoresServiceHost()).thenReturn("http://host/");
+        when(configuration.getCbPoresMasterDesignationEndpoint()).thenReturn("/designations");
+        when(requestServiceImpl.fetchResultUsingPost(any(), any(), any(), any())).thenReturn(response);
+        CSVRecord csvRecord = csvRecordWithColumn(4, "Manager");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateDesignationColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("Manager", values.get(Constants.DESIGNATION));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateGenderColumnV1_invalid_addsError() throws Exception {
+        when(configuration.getBulkUploadGenderValue()).thenReturn(List.of("Male"));
+        CSVRecord csvRecord = csvRecordWithColumn(5, "Female");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateGenderColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertFalse(values.containsKey(Constants.GENDER));
+        assertTrue(errList.stream().anyMatch(e -> e.startsWith("Invalid Gender")));
+    }
+
+    @Test
+    void testValidateGenderColumnV1_valid_stores() throws Exception {
+        when(configuration.getBulkUploadGenderValue()).thenReturn(List.of("Male"));
+        CSVRecord csvRecord = csvRecordWithColumn(5, "Male");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateGenderColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("Male", values.get(Constants.GENDER));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateCategoryColumnV1_invalid_addsError() throws Exception {
+        when(configuration.getBulkUploadCategoryValue()).thenReturn(List.of("OBC"));
+        CSVRecord csvRecord = csvRecordWithColumn(6, "SC");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateCategoryColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertFalse(values.containsKey(Constants.CATEGORY));
+        assertTrue(errList.stream().anyMatch(e -> e.startsWith("Invalid Category")));
+    }
+
+    @Test
+    void testValidateCategoryColumnV1_valid_stores() throws Exception {
+        when(configuration.getBulkUploadCategoryValue()).thenReturn(List.of("OBC"));
+        CSVRecord csvRecord = csvRecordWithColumn(6, "OBC");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateCategoryColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("OBC", values.get(Constants.CATEGORY));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateDobColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(7, "99-99-9999");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateDobColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertTrue(errList.contains("Invalid format for Date of Birth type. Expecting in format dd-mm-yyyy"));
+        assertFalse(values.containsKey(Constants.DOB));
+    }
+
+    @Test
+    void testValidateDobColumnV1_valid_stores() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(7, "01-01-1990");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateDobColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("01-01-1990", values.get(Constants.DOB));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateMotherTongueColumnV1_invalidFieldValue_addsError() throws Exception {
+        when(redisCacheMgr.keyExists("languages")).thenReturn(true);
+        when(redisCacheMgr.valueExists("languages", "klingon")).thenReturn(false);
+        CSVRecord csvRecord = csvRecordWithColumn(8, "Klingon");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateMotherTongueColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("Klingon", values.get(Constants.DOMICILE_MEDIUM));
+        assertTrue(errList.contains("Invalid Mother Tongue: Mother Tongue should be added from default list and/or cannot contain special character(s)"));
+    }
+
+    @Test
+    void testValidateMotherTongueColumnV1_valid_noError() throws Exception {
+        when(redisCacheMgr.keyExists("languages")).thenReturn(true);
+        when(redisCacheMgr.valueExists("languages", "english")).thenReturn(true);
+        CSVRecord csvRecord = csvRecordWithColumn(8, "English");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateMotherTongueColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("English", values.get(Constants.DOMICILE_MEDIUM));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateEmployeeIdColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(9, "ID#Invalid!");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateEmployeeIdColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("ID#Invalid!", values.get(Constants.EMPLOYEE_CODE));
+        assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Employee ID")));
+    }
+
+    @Test
+    void testValidateEmployeeIdColumnV1_valid_noError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(9, "EMP001");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateEmployeeIdColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("EMP001", values.get(Constants.EMPLOYEE_CODE));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidatePinCodeColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(10, "abc12");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validatePinCodeColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("abc12", values.get(Constants.PIN_CODE));
+        assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Pin Code")));
+    }
+
+    @Test
+    void testValidatePinCodeColumnV1_valid_noError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(10, "560001");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validatePinCodeColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("560001", values.get(Constants.PIN_CODE));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateExternalSystemIdColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(11, "bad id!");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateExternalSystemIdColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("bad id!", values.get(Constants.EXTERNAL_SYSTEM_ID));
+        assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid External System ID")));
+    }
+
+    @Test
+    void testValidateExternalSystemIdColumnV1_valid_noError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(11, "SYS123");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateExternalSystemIdColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("SYS123", values.get(Constants.EXTERNAL_SYSTEM_ID));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateExternalSystemColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(12, "123456");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateExternalSystemColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("123456", values.get(Constants.EXTERNAL_SYSTEM));
+        assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid External System Name")));
+    }
+
+    @Test
+    void testValidateExternalSystemColumnV1_valid_noError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(12, "ExtSystem");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateExternalSystemColumnV1", new Class[]{CSVRecord.class, Map.class, List.class}, csvRecord, values, errList);
+        assertEquals("ExtSystem", values.get(Constants.EXTERNAL_SYSTEM));
+        assertTrue(errList.isEmpty());
+    }
+
+    @Test
+    void testValidateTagColumnV1_invalid_addsError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(13, "Tag1;Tag2");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateTagColumnV1", new Class[]{CSVRecord.class, Map.class, List.class, String.class}, csvRecord, values, errList, ";");
+        assertNotNull(values.get(Constants.TAG));
+        assertTrue(errList.stream().anyMatch(e -> e.contains("Invalid Tag")));
+    }
+
+    @Test
+    void testValidateTagColumnV1_valid_noError() throws Exception {
+        CSVRecord csvRecord = csvRecordWithColumn(13, "Bihar Circle;Patna Division");
+        Map<String, Object> values = new HashMap<>();
+        List<String> errList = new ArrayList<>();
+        invokePrivate("validateTagColumnV1", new Class[]{CSVRecord.class, Map.class, List.class, String.class}, csvRecord, values, errList, ";");
+        assertNotNull(values.get(Constants.TAG));
+        assertTrue(errList.isEmpty());
+    }
+
+    // ---------- applyPendingRequestForStatusV1 (previously entirely uncovered) ----------
+
+    @Test
+    void testApplyPendingRequestForStatusV1_matchingKey_appliesUpdate() throws Exception {
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setWfId("wf-10");
+        String json = "[{\"toValue\":{\"firstname\":\"Expected\"}}]";
+        entity.setUpdateFieldValues(json);
+        List<Map<String, Object>> parsed = List.of(Map.of(Constants.TO_VALUE, Map.of("firstname", "Expected")));
+        when(mapper.readValue(json, List.class)).thenReturn(parsed);
+        WfStatusEntity successLookup = new WfStatusEntity();
+        successLookup.setCurrentStatus(Constants.APPROVED);
+        when(wfStatusRepo.findByWfId("wf-10")).thenReturn(successLookup);
+
+        Map<String, Object> valuesToBeUpdate = new HashMap<>();
+        valuesToBeUpdate.put("firstname", "Expected");
+        Map<String, Object> csvValues = new HashMap<>();
+
+        boolean result = (boolean) invokePrivate("applyPendingRequestForStatusV1",
+                new Class[]{WfStatusEntity.class, Map.class, Map.class, boolean.class},
+                entity, valuesToBeUpdate, csvValues, true);
+        assertTrue(result);
+        assertEquals(Constants.SUCCESSFUL_UPERCASE, csvValues.get(Constants.STATUS_BULK_UPLOAD));
+    }
+
+    @Test
+    void testApplyPendingEntryUpdateV1_notApproved_returnsUnchanged() throws Exception {
+        WfStatusEntity entity = new WfStatusEntity();
+        entity.setUpdateFieldValues("[]");
+        Map.Entry<String, String> entry = new AbstractMap.SimpleEntry<>("firstname", "Expected");
+        Map<String, Object> valuesToBeUpdate = new HashMap<>();
+        valuesToBeUpdate.put("firstname", "Different");
+        Map<String, Object> csvValues = new HashMap<>();
+
+        boolean result = (boolean) invokePrivate("applyPendingEntryUpdateV1",
+                new Class[]{WfStatusEntity.class, Map.Entry.class, Map.class, Map.class, boolean.class},
+                entity, entry, valuesToBeUpdate, csvValues, true);
+        assertTrue(result);
+        assertEquals(Constants.REJECTED, entity.getCurrentStatus());
+        assertTrue(valuesToBeUpdate.containsKey("firstname"));
+    }
+
+    // ---------- finalizeRecordWithoutProfileUpdateV1 failure branch (1186-1195) ----------
+
+    @Test
+    void testFinalizeRecordWithoutProfileUpdateV1_failure_incrementsFailedCount() throws Exception {
+        Object counters = newCounters();
+        Map<String, Object> csvValues = new HashMap<>();
+        List<Map<String, Object>> updatedRecords = new ArrayList<>();
+        invokePrivate("finalizeRecordWithoutProfileUpdateV1",
+                new Class[]{boolean.class, Map.class, List.class, Class.forName("org.sunbird.workflow.service.UserBulkUploadService$BulkUploadCounters")},
+                false, csvValues, updatedRecords, counters);
+        assertEquals(1, getField(counters, "failedRecordsCount"));
+        assertEquals(1, updatedRecords.size());
+    }
+
+    // ---------- updateBulkUserProfile deeper structural branches (1351-1406) ----------
+
+    @Test
+    void testUpdateBulkUserProfile_profileDetailsNotAMap_returnsFalse() throws Exception {
+        Map<String, Object> userResponse = new HashMap<>();
+        userResponse.put(Constants.PROFILE_DETAILS, "not-a-map");
+        when(userUtil.userProfileRead("user-x")).thenReturn(userResponse);
+        boolean result = (boolean) invokePrivate("updateBulkUserProfile", new Class[]{String.class, Map.class}, "user-x", new HashMap<>());
+        assertFalse(result);
+    }
+
+    @Test
+    void testUpdateBulkUserProfile_personalDetailsNotAMap_returnsFalse() throws Exception {
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PERSONAL_DETAILS, "not-a-map");
+        profileDetails.put(Constants.EMPLOYMENT_DETAILS, new HashMap<String, Object>());
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, new ArrayList<Map<String, Object>>());
+        Map<String, Object> userResponse = new HashMap<>();
+        userResponse.put(Constants.PROFILE_DETAILS, profileDetails);
+        when(userUtil.userProfileRead("user-y")).thenReturn(userResponse);
+        boolean result = (boolean) invokePrivate("updateBulkUserProfile", new Class[]{String.class, Map.class}, "user-y", new HashMap<>());
+        assertFalse(result);
+    }
+
+    @Test
+    void testUpdateBulkUserProfile_routesToAllThreeDetailCategories() throws Exception {
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PERSONAL_DETAILS, new HashMap<String, Object>());
+        profileDetails.put(Constants.EMPLOYMENT_DETAILS, new HashMap<String, Object>());
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, new ArrayList<Map<String, Object>>());
+        Map<String, Object> userResponse = new HashMap<>();
+        userResponse.put(Constants.PROFILE_DETAILS, profileDetails);
+        when(userUtil.userProfileRead("user-z")).thenReturn(userResponse);
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com");
+        when(configuration.getUserProfileUpdateEndPoint()).thenReturn("/user/v1/update");
+        when(requestServiceImpl.fetchResultUsingPatch(anyString(), anyMap(), anyMap()))
+                .thenReturn(Collections.singletonMap(Constants.RESPONSE_CODE, Constants.OK));
+
+        Map<String, Object> valuesToBeUpdate = new HashMap<>();
+        valuesToBeUpdate.put(Constants.FIRSTNAME, "Jane");
+        valuesToBeUpdate.put(Constants.GROUP, "G1");
+        valuesToBeUpdate.put(Constants.EMPLOYEE_CODE, "E1");
+
+        boolean result = (boolean) invokePrivate("updateBulkUserProfile", new Class[]{String.class, Map.class}, "user-z", valuesToBeUpdate);
+        assertTrue(result);
+
+        Map<String, Object> personalDetails = (Map<String, Object>) profileDetails.get(Constants.PERSONAL_DETAILS);
+        Map<String, Object> employmentDetails = (Map<String, Object>) profileDetails.get(Constants.EMPLOYMENT_DETAILS);
+        List<Map<String, Object>> professionalDetailsList = (List<Map<String, Object>>) profileDetails.get(Constants.PROFESSIONAL_DETAILS);
+        assertEquals("Jane", personalDetails.get(Constants.FIRSTNAME));
+        assertEquals("E1", employmentDetails.get(Constants.EMPLOYEE_CODE));
+        assertEquals("G1", professionalDetailsList.get(0).get(Constants.GROUP));
+    }
+
+    @Test
+    void testUpdateBulkUserProfile_patchReturnsNonOk_returnsFalse() throws Exception {
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PERSONAL_DETAILS, new HashMap<String, Object>());
+        profileDetails.put(Constants.EMPLOYMENT_DETAILS, new HashMap<String, Object>());
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, new ArrayList<Map<String, Object>>());
+        Map<String, Object> userResponse = new HashMap<>();
+        userResponse.put(Constants.PROFILE_DETAILS, profileDetails);
+        when(userUtil.userProfileRead("user-w")).thenReturn(userResponse);
+        when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com");
+        when(configuration.getUserProfileUpdateEndPoint()).thenReturn("/user/v1/update");
+        when(requestServiceImpl.fetchResultUsingPatch(anyString(), anyMap(), anyMap())).thenReturn(null);
+
+        boolean result = (boolean) invokePrivate("updateBulkUserProfile", new Class[]{String.class, Map.class}, "user-w", new HashMap<>());
+        assertFalse(result);
+    }
+
+    @Test
+    void testGetOrCreateFirstProfessionalDetail_firstElementNotAMap_returnsNull() throws Exception {
+        List<Object> list = new ArrayList<>();
+        list.add("not-a-map");
+        Map<String, Object> profileDetails = new HashMap<>();
+        profileDetails.put(Constants.PROFESSIONAL_DETAILS, list);
+        Object result = invokePrivate("getOrCreateFirstProfessionalDetail", new Class[]{Map.class}, profileDetails);
+        assertNull(result);
     }
 }

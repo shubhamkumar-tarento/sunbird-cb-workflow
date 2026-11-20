@@ -124,7 +124,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetSession_returnsExistingOpenSession_withoutCreatingNew() throws Exception {
+    void testGetSession_returnsExistingOpenSession_withoutCreatingNew() {
         CqlSession mockSession = mock(CqlSession.class);
         when(mockSession.isClosed()).thenReturn(false);
         Map<String, CqlSession> sessionMap = getStaticSessionMap();
@@ -140,7 +140,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetSession_createsNewSession_whenExistingIsClosed() throws Exception {
+    void testGetSession_createsNewSession_whenExistingIsClosed() {
         CqlSession closedSession = mock(CqlSession.class);
         when(closedSession.isClosed()).thenReturn(true);
         Map<String, CqlSession> sessionMap = getStaticSessionMap();
@@ -261,7 +261,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetTableList_returnsTableNames_whenKeyspacePresent() throws Exception {
+    void testGetTableList_returnsTableNames_whenKeyspacePresent() {
         CassandraConnectionManagerImpl outer = mock(CassandraConnectionManagerImpl.class);
         CqlSession mockSession = mock(CqlSession.class);
         setSession(outer, mockSession);
@@ -281,7 +281,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetTableList_throwsWhenKeyspaceNotFound() throws Exception {
+    void testGetTableList_throwsWhenKeyspaceNotFound() {
         CassandraConnectionManagerImpl outer = mock(CassandraConnectionManagerImpl.class);
         CqlSession mockSession = mock(CqlSession.class);
         setSession(outer, mockSession);
@@ -297,7 +297,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetSession_cacheMiss_createsAndCachesNewSession() throws Exception {
+    void testGetSession_cacheMiss_createsAndCachesNewSession() {
         try (MockedStatic<PropertiesCache> propertiesCacheStatic = Mockito.mockStatic(PropertiesCache.class);
              MockedStatic<CqlSession> cqlSessionStatic = Mockito.mockStatic(CqlSession.class)) {
 
@@ -333,7 +333,7 @@ class CassandraConnectionManagerImplTest {
     }
 
     @Test
-    void testGetTableList_wrapsUnexpectedException() throws Exception {
+    void testGetTableList_wrapsUnexpectedException() {
         CassandraConnectionManagerImpl outer = mock(CassandraConnectionManagerImpl.class);
         CqlSession mockSession = mock(CqlSession.class);
         setSession(outer, mockSession);

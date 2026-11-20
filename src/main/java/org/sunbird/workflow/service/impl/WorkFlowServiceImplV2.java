@@ -20,7 +20,6 @@ import org.sunbird.workflow.config.Constants;
 import org.sunbird.workflow.config.RedisCacheMgr;
 import org.sunbird.workflow.exception.ApplicationException;
 import org.sunbird.workflow.exception.BadRequestException;
-import org.sunbird.workflow.exception.InvalidDataInputException;
 import org.sunbird.workflow.models.*;
 import org.sunbird.workflow.postgres.entity.WfStatusEntity;
 import org.sunbird.workflow.postgres.repo.WfStatusRepo;

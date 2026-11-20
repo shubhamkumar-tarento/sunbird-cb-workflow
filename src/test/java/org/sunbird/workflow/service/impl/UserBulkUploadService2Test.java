@@ -79,6 +79,8 @@ class UserBulkUploadService2Test {
 
         when(configuration.getCsvDelimiter()).thenReturn(',');
         when(configuration.getTagsDelimiter()).thenReturn(";");
+        when(configuration.getLocalBasePath()).thenReturn(tempFile.getParent() + File.separator);
+        when(configuration.getCsvDesignationRegex()).thenReturn(".*");
         when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/user/search");
         when(configuration.getGroupValues()).thenReturn(List.of("Group1"));
@@ -166,6 +168,11 @@ class UserBulkUploadService2Test {
 
         when(configuration.getCsvDelimiter()).thenReturn(',');
         when(configuration.getTagsDelimiter()).thenReturn(";");
+        when(configuration.getLocalBasePath()).thenReturn(tempFile.getParent() + File.separator);
+        when(configuration.getCsvDesignationRegex()).thenReturn(".*");
+        when(configuration.getGroupValues()).thenReturn(List.of("Group1"));
+        when(configuration.getBulkUploadCategoryValue()).thenReturn(List.of("OBC"));
+        when(configuration.getBulkUploadGenderValue()).thenReturn(List.of("Male"));
         when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
 
         // Sample headers and request object
@@ -247,6 +254,8 @@ class UserBulkUploadService2Test {
         writer.write("");
         writer.close();
 
+        when(configuration.getLocalBasePath()).thenReturn(tempFile.getParent() + File.separator);
+
         Map<String, String> input = new HashMap<>();
         input.put(Constants.FILE_NAME, tempFile.getName());
         input.put(Constants.ROOT_ORG_ID, "rootOrg123");
@@ -260,6 +269,7 @@ class UserBulkUploadService2Test {
 
         when(configuration.getCsvDelimiter()).thenReturn(',');
         when(configuration.getTagsDelimiter()).thenReturn(";");
+        when(configuration.getLocalBasePath()).thenReturn(tempFile.getParent() + File.separator);
 
         FileWriter writer = new FileWriter(tempFile);
         writer.write("Full Name,Email,Phone\n");
@@ -294,6 +304,11 @@ class UserBulkUploadService2Test {
 
         when(configuration.getCsvDelimiter()).thenReturn(',');
         when(configuration.getTagsDelimiter()).thenReturn(";");
+        when(configuration.getLocalBasePath()).thenReturn(tempFile.getParent() + File.separator);
+        when(configuration.getCsvDesignationRegex()).thenReturn(".*");
+        when(configuration.getGroupValues()).thenReturn(List.of("Group1"));
+        when(configuration.getBulkUploadCategoryValue()).thenReturn(List.of("OBC"));
+        when(configuration.getBulkUploadGenderValue()).thenReturn(List.of("Male"));
         when(configuration.getLmsServiceHost()).thenReturn("http://lms.example.com/");
         when(configuration.getLmsUserSearchEndPoint()).thenReturn("/user/search");
 
