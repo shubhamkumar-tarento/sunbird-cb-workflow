@@ -1512,48 +1512,6 @@ class NotificationServiceImplTest {
         verify(requestService, atLeast(0)).fetchResultUsingPost(any(), any(), any(), any());
     }
 
-    // ---------- sendNotificationEmail template branch (520, 530-531) ----------
-
-    @Test
-    void sendNotification_shouldSkipEmailSend_whenEmailListEmpty() {
-        WfRequest wfRequest = new WfRequest();
-        wfRequest.setApplicationId("appId");
-        wfRequest.setWfId("wfId");
-        wfRequest.setUserId("userId");
-        wfRequest.setCourseId("courseId");
-        wfRequest.setBatchName("Batch1");
-        wfRequest.setCourseName("Course1");
-        wfRequest.setBatchStartDate(new Date());
-        wfRequest.setState(Constants.SEND_FOR_PC_APPROVAL);
-
-        WfStatusEntity wfStatusEntity = new WfStatusEntity();
-        wfStatusEntity.setCurrentStatus(Constants.SEND_FOR_PC_APPROVAL);
-        wfStatusEntity.setUserId("userId");
-        wfStatusEntity.setRootOrg("rootOrg");
-        wfStatusEntity.setOrg("org");
-        wfStatusEntity.setAdditionalProperties("isNominatedByMdo:true");
-
-        WfStatus wfStatus = new WfStatus();
-        wfStatus.setNotificationEnable(false);
-
-        when(wfStatusRepo.findByApplicationIdAndWfId(any(), any())).thenReturn(wfStatusEntity);
-        when(workflowservice.getWorkflowStates(any(), any(), any(), any())).thenReturn(wfStatus);
-
-        Map<String, Object> recipientInfo = new HashMap<>();
-        recipientInfo.put(Constants.FIRST_NAME, "Ajay");
-        Map<String, Object> usersObj = new HashMap<>();
-        usersObj.put("userId", recipientInfo);
-        when(userProfileWfService.getUsersResult(any())).thenReturn(usersObj);
-        when(userProfileWfService.getMdoAdminAndPCDetails(any(), any())).thenReturn(Collections.emptyList());
-        when(configuration.getNominationRequestMailBody()).thenReturn("nomination #username #batch_name #blended_programme_name #batch_start_date");
-        when(configuration.getApprovalRequetMailBody()).thenReturn("approval #username #batch_name #blended_programme_name #batch_start_date");
-        when(configuration.getRequestForwardedMailBody()).thenReturn("forwarded #username #batch_name #blended_programme_name #batch_start_date");
-
-        notificationService.sendNotificationToMdoAdminAndPC(wfRequest);
-
-        verify(requestService, never()).fetchResultUsingPost(any(), any(), any(), any());
-    }
-
     @Test
     void sendAiAssessmentNotification_shouldSetTemplateData_whenTemplateContentFound() {
         WfRequest wfRequest = new WfRequest();

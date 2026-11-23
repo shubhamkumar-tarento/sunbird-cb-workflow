@@ -1630,10 +1630,10 @@ class BPWorkFlowServiceImplTest {
     }
 
     private Map<String, Object> actorProfileWithRole(String... roles) {
-        Map<String, Object> org = new HashMap<>();
-        org.put(Constants.ROLES, List.of(roles));
+        Map<String, Object> orgEntry = new HashMap<>();
+        orgEntry.put(Constants.ROLES, List.of(roles));
         Map<String, Object> profile = new HashMap<>();
-        profile.put(Constants.ORGANISATIONS, List.of(org));
+        profile.put(Constants.ORGANISATIONS, List.of(orgEntry));
         return profile;
     }
 

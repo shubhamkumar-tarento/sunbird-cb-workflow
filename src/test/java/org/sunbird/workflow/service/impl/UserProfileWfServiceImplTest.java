@@ -956,7 +956,7 @@ class UserProfileWfServiceImplTest {
     // ---------- updateProfile: profile-read failure branches (79-85) ----------
 
     @Test
-    void updateProfile_profileReadReturnsNull_marksFailed() throws Exception {
+    void updateProfile_profileReadReturnsNull_marksFailed() {
         WfRequest wfRequest = new WfRequest();
         wfRequest.setApplicationId("appId");
         wfRequest.setWfId("wfId");
@@ -1179,8 +1179,8 @@ class UserProfileWfServiceImplTest {
 
         Map<String, Object> userResult = userProfileWfServiceImpl.getUsersResult(userIds);
 
-        Map<String, Object> record = (Map<String, Object>) userResult.get("u1");
-        assertEquals("Engineering Dept", record.get(Constants.DEPARTMENT_NAME));
+        Map<String, Object> userRecord = (Map<String, Object>) userResult.get("u1");
+        assertEquals("Engineering Dept", userRecord.get(Constants.DEPARTMENT_NAME));
     }
 
     // ---------- migrationUpdate via updateProfile: migrateUser failure (394-396) ----------
